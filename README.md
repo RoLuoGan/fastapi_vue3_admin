@@ -2,17 +2,17 @@
      <p align="center">
           <img src="./fastdocs/src/public/logo.png" width="150" height="150" alt="logo" />  
      </p>
-     <h1>FastAPI Vue3 Admin <sup style="background-color: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.4em; vertical-align: super; margin-left: 5px;">v2.0.0</h1>
+     <h1>FastApiAdmin <sup style="background-color: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.4em; vertical-align: super; margin-left: 5px;">v2.0.0</h1>
      <h3>现代化全栈快速开发平台 | Modern Full-Stack Rapid Development Platform</h3>
      <p>如果你喜欢这个项目，给个 ⭐️ 支持一下吧！</p>
      <p align="center">
-          <a href="https://gitee.com/tao__tao/fastapi_vue3_admin.git" target="_blank">
-               <img src="https://gitee.com/tao__tao/fastapi_vue3_admin/badge/star.svg?theme=dark" alt="Gitee Stars">
+          <a href="https://gitee.com/tao__tao/FastapiAdmin.git" target="_blank">
+               <img src="https://gitee.com/tao__tao/FastapiAdmin/badge/star.svg?theme=dark" alt="Gitee Stars">
           </a>
-          <a href="https://github.com/1014TaoTao/fastapi_vue3_admin.git" target="_blank">
-               <img src="https://img.shields.io/github/stars/1014TaoTao/fastapi_vue3_admin?style=social" alt="GitHub Stars">
+          <a href="https://github.com/1014TaoTao/FastapiAdmin.git" target="_blank">
+               <img src="https://img.shields.io/github/stars/1014TaoTao/FastapiAdmin?style=social" alt="GitHub Stars">
           </a>
-          <a href="https://gitee.com/tao__tao/fastapi_vue3_admin/blob/master/LICENSE" target="_blank">
+          <a href="https://gitee.com/tao__tao/FastapiAdmin/blob/master/LICENSE" target="_blank">
                <img src="https://img.shields.io/badge/License-MIT-orange" alt="License">
           </a>
           <img src="https://img.shields.io/badge/Python-≥3.10-blue"> 
@@ -30,7 +30,7 @@
 
 ## 📘 项目介绍
 
-**FastAPI Vue3 Admin** 是一套 **完全开源、高度模块化、技术先进的现代化快速开发平台**，旨在帮助开发者高效搭建高质量的企业级中后台系统。该项目采用 **前后端分离架构**，融合 Python 后端框架 `FastAPI` 和前端主流框架 `Vue3` 实现多端统一开发，提供了一站式开箱即用的开发体验。
+**FastApiAdmin** 是一套 **完全开源、高度模块化、技术先进的现代化快速开发平台**，旨在帮助开发者高效搭建高质量的企业级中后台系统。该项目采用 **前后端分离架构**，融合 Python 后端框架 `FastAPI` 和前端主流框架 `Vue3` 实现多端统一开发，提供了一站式开箱即用的开发体验。
 
 > **设计初心**: 以模块化、松耦合为核心，追求丰富的功能模块、简洁易用的接口、详尽的开发文档和便捷的维护方式。通过统一框架和组件，降低技术选型成本，遵循开发规范和设计模式，构建强大的代码分层模型，搭配完善的本地中文化支持，专为团队和企业开发场景量身定制。
 
@@ -49,7 +49,7 @@
 ## 📦 工程结构概览
 
 ```sh
-fastapi_vue3_admin
+FastapiAdmin
 ├─ backend               # 后端工程 (FastAPI + Python)
 ├─ frontend              # Web前端工程 (Vue3 + Element Plus)
 ├─ fastapp               # 移动端工程 (UniApp + Wot Design Uni)
@@ -114,9 +114,9 @@ fastapi_vue3_admin
 
 ```bash
 # 克隆代码到本地
-git clone https://gitee.com/tao__tao/fastapi_vue3_admin.git
+git clone https://gitee.com/tao__tao/FastapiAdmin.git
 # 或者
-git clone https://github.com/1014TaoTao/fastapi_vue3_admin.git
+git clone https://github.com/1014TaoTao/FastapiAdmin.git
 ```
 
 ### 后端启动
@@ -360,8 +360,8 @@ docker compose down
 
 ## 👥 贡献者
 
-<a href="https://github.com/1014TaoTao/fastapi_vue3_admin/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=1014TaoTao/fastapi_vue3_admin"/>
+<a href="https://github.com/1014TaoTao/FastapiAdmin/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=1014TaoTao/FastapiAdmin"/>
 </a>
 
 ## 🙏 特别鸣谢
@@ -389,4 +389,4 @@ docker compose down
 
 如果你喜欢这个项目，请给我一个 ⭐️ Star 支持一下吧！非常感谢！
 
-[![Stargazers over time](https://starchart.cc/1014TaoTao/fastapi_vue3_admin.svg?variant=adaptive)](https://starchart.cc/1014TaoTao/fastapi_vue3_admin)
+[![Stargazers over time](https://starchart.cc/1014TaoTao/FastapiAdmin.svg?variant=adaptive)](https://starchart.cc/1014TaoTao/FastapiAdmin)

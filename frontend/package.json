@@ -134,12 +134,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://gitee.com/tao__tao/fastapi_vue3_admin.git"
+    "url": "https://gitee.com/tao__tao/FastapiAdmin.git"
   },
   "bugs": {
-    "url": "https://gitee.com/tao__tao/fastapi_vue3_admin/issues"
+    "url": "https://gitee.com/tao__tao/FastapiAdmin/issues"
   },
   "author": "fastapiadmin <948080782@qq.com>",
   "license": "MIT",
-  "homepage": "https://gitee.com/tao__tao/fastapi_vue3_admin"
+  "homepage": "https://gitee.com/tao__tao/FastapiAdmin"
 }

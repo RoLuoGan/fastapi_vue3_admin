@@ -32,9 +32,9 @@ title: 快速开始
 
 ```sh
 # 克隆代码到本地
-git clone https://gitee.com/tao__tao/fastapi_vue3_admin.git
+git clone https://gitee.com/tao__tao/FastapiAdmin.git
 或
-git clone https://github.com/1014TaoTao/fastapi_vue3_admin.git
+git clone https://github.com/1014TaoTao/FastapiAdmin.git
 ```
 
 ### 本地后端启动
@@ -109,7 +109,7 @@ pnpm run docs:build
 ### docker 部署
 
 ```sh
-# 复制脚本 `fastapi_vue3_admin/start.sh` 脚本文件到服务器, 并赋予执行权限
+# 复制脚本 `FastapiAdmin/start.sh` 脚本文件到服务器, 并赋予执行权限
 chmod +x start.sh
 # 执行脚本
 ./start.sh
@@ -126,15 +126,15 @@ docker rmi <镜像名>
 # 删除容器
 docker rm <容器名>
 # 后端配置文件目录
-fastapi_vue3_admin/backend/env/.env.prod.py
+FastapiAdmin/backend/env/.env.prod.py
 # 前端配置文件目录
-fastapi_vue3_admin/frontend/vite.config.ts
+FastapiAdmin/frontend/vite.config.ts
 和
-fastapi_vue3_admin/frontend/.env.production
+FastapiAdmin/frontend/.env.production
 # 部署文件目录
-fastapi_vue3_admin/docker-compose.yaml
+FastapiAdmin/docker-compose.yaml
 和
-fastapi_vue3_admin/devops/devops/nginx/nginx.conf
+FastapiAdmin/devops/devops/nginx/nginx.conf
 
 ```
 

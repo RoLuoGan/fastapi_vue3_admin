@@ -42,7 +42,7 @@
 <script lang="ts" setup>
 
 // 系统配置数据
-const webTitle = ref("FastAPI Vue3 Admin");
+const webTitle = ref("FastApiAdmin");
 const webDescription = ref("完全开源的权限管理系统");
 const version = ref("V2.0.0");
 const keepRecord = ref("陕ICP备2025069493号-1");

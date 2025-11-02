@@ -6,7 +6,7 @@ export default defineConfig({
     srcDir: 'src',
     outDir: 'dist',
     lang: 'zh-CN',
-    title: 'Fastapi Vue3 Admin',
+    title: 'FastApiAdmin',
     description: '现代、开源、全栈融合的中后台快速开发平台',
     head: [
         ["link",{rel: "apple-touch-icon", sizes: "180x180", href: "/favicon.png"}],
@@ -43,9 +43,9 @@ export default defineConfig({
             {
                 text: '版本',
                 items: [
-                { text: 'master', link: 'https://github.com/1014TaoTao/fastapi_vue3_admin', target: '_blank' },
-                { text: 'V2.0.0', link: 'https://github.com/1014TaoTao/fastapi_vue3_admin/tree/v2.0.0', target: '_blank' },
-                { text: 'V1.0.0', link: 'https://github.com/1014TaoTao/fastapi_vue3_admin/tree/v1.0.0', target: '_blank' }
+                { text: 'master', link: 'https://github.com/1014TaoTao/FastapiAdmin', target: '_blank' },
+                { text: 'V2.0.0', link: 'https://github.com/1014TaoTao/FastapiAdmin/tree/v2.0.0', target: '_blank' },
+                { text: 'V1.0.0', link: 'https://github.com/1014TaoTao/FastapiAdmin/tree/v1.0.0', target: '_blank' }
                 ]
             },
             { text: '关于我们', link: '/overview/about' },
@@ -76,12 +76,12 @@ export default defineConfig({
             }
         ],
         socialLinks: [
-            { icon: 'github', link: 'https://github.com/1014TaoTao/fastapi_vue3_admin' },
-            { icon: 'gitee', link: 'https://gitee.com/tao__tao/fastapi_vue3_admin' },
-            { icon: 'gitcode', link: 'https://gitcode.com/qq_36002987/fastapi_vue3_admin' }
+            { icon: 'github', link: 'https://github.com/1014TaoTao/FastapiAdmin' },
+            { icon: 'gitee', link: 'https://gitee.com/tao__tao/FastapiAdmin' },
+            { icon: 'gitcode', link: 'https://gitcode.com/qq_36002987/FastapiAdmin' }
         ],
         footer: {
-            message: '<a href="https://github.com/1014TaoTao/fastapi_vue3_admin/blob/master/LICENSE" target="_blank">MIT License</a>',
+            message: '<a href="https://github.com/1014TaoTao/FastapiAdmin/blob/master/LICENSE" target="_blank">MIT License</a>',
             copyright: 'Copyright © 2025-2026 service.fastapiadmin.com 版权所有 |隐私 |条款 陕ICP备2025069493号-1'
         },
         search: {

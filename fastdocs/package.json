@@ -1,6 +1,6 @@
 {
   "name": "fastdocs",
-  "description": "Fastapi_Vue3_Admin 项目文档",
+  "description": "FastapiAdmin 项目文档",
   "version": "2.0.0",
   "private": true,
   "type": "module",
@@ -25,12 +25,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://gitee.com/tao__tao/fastapi_vue3_admin.git"
+    "url": "https://gitee.com/tao__tao/FastapiAdmin.git"
   },
   "bugs": {
-    "url": "https://gitee.com/tao__tao/fastapi_vue3_admin/issues"
+    "url": "https://gitee.com/tao__tao/FastapiAdmin/issues"
   },
   "author": "fastapiadmin <948080782@qq.com>",
   "license": "MIT",
-  "homepage": "https://gitee.com/tao__tao/fastapi_vue3_admin"
+  "homepage": "https://gitee.com/tao__tao/FastapiAdmin"
 }

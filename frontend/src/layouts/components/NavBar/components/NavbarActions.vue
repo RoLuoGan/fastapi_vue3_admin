@@ -152,7 +152,7 @@ function handleDocumentClick() {
  * Gitee 项目地址
  */
 function handleGiteeClick() {
-  window.open('https://gitee.com/tao__tao/fastapi_vue3_admin')
+  window.open('https://gitee.com/tao__tao/FastapiAdmin')
 }
 
 /**

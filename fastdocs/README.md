@@ -3,7 +3,7 @@
 ## 项目结构
 
 ```sh
-fastapi_vue3_admin/fastdocs
+FastapiAdmin/fastdocs
 ├─ .vitepress           # 静态资源文件
 │  ├─ cache             # 缓存
 │  ├─ theme             # 主题
