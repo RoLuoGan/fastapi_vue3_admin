@@ -3,7 +3,7 @@
           <img src="./fastdocs/src/public/logo.png" width="150" height="150" alt="logo" />  
      </p>
      <h1>FastApiAdmin <sup style="background-color: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.4em; vertical-align: super; margin-left: 5px;">v2.0.0</h1>
-     <h3>现代化全栈快速开发平台 | Modern Full-Stack Rapid Development Platform</h3>
+     <h3>现代化全栈快速开发平台</h3>
      <p>如果你喜欢这个项目，给个 ⭐️ 支持一下吧！</p>
      <p align="center">
           <a href="https://gitee.com/tao__tao/FastapiAdmin.git" target="_blank">
