@@ -2,17 +2,17 @@
      <p align="center">
           <img src="./fastdocs/src/public/logo.png" width="150" height="150" alt="logo" /> 
      </p>
-     <h1>FastAPI Vue3 Admin <img src="https://img.shields.io/badge/Version-v2.0.0-blue" alt="Version"></h1>
+     <h1>FastApiAdmin <img src="https://img.shields.io/badge/Version-v2.0.0-blue" alt="Version"></h1>
      <h3>Modern Full-Stack Rapid Development Platform | 现代化全栈快速开发平台</h3>
      <p>If you like this project, please give it a ⭐️ to show your support!</p>
      <p align="center">
-          <a href="https://gitee.com/tao__tao/fastapi_vue3_admin.git" target="_blank">
-               <img src="https://gitee.com/tao__tao/fastapi_vue3_admin/badge/star.svg?theme=dark" alt="Gitee Stars">
+          <a href="https://gitee.com/tao__tao/FastapiAdmin.git" target="_blank">
+               <img src="https://gitee.com/tao__tao/FastapiAdmin/badge/star.svg?theme=dark" alt="Gitee Stars">
           </a>
-          <a href="https://github.com/1014TaoTao/fastapi_vue3_admin.git" target="_blank">
-               <img src="https://img.shields.io/github/stars/1014TaoTao/fastapi_vue3_admin?style=social" alt="GitHub Stars">
+          <a href="https://github.com/1014TaoTao/FastapiAdmin.git" target="_blank">
+               <img src="https://img.shields.io/github/stars/1014TaoTao/FastapiAdmin?style=social" alt="GitHub Stars">
           </a>
-          <a href="https://gitee.com/tao__tao/fastapi_vue3_admin/blob/master/LICENSE" target="_blank">
+          <a href="https://gitee.com/tao__tao/FastapiAdmin/blob/master/LICENSE" target="_blank">
                <img src="https://img.shields.io/badge/License-MIT-orange" alt="License">
           </a>
           <img src="https://img.shields.io/badge/Python-≥3.10-blue"> 
@@ -30,7 +30,7 @@ English | [简体中文](./README.md)
 
 ## 📘 Project Introduction
 
-**FastAPI Vue3 Admin** is a **completely open-source, highly modular, and technologically advanced modern rapid development platform** designed to help developers efficiently build high-quality enterprise-level backend and frontend systems. This project adopts a **frontend-backend separation architecture**, integrating the Python backend framework `FastAPI` and the mainstream frontend framework `Vue3` to achieve unified development across multiple terminals, providing a one-stop out-of-the-box development experience.
+**FastApiAdmin** is a **completely open-source, highly modular, and technologically advanced modern rapid development platform** designed to help developers efficiently build high-quality enterprise-level backend and frontend systems. This project adopts a **frontend-backend separation architecture**, integrating the Python backend framework `FastAPI` and the mainstream frontend framework `Vue3` to achieve unified development across multiple terminals, providing a one-stop out-of-the-box development experience.
 
 > **Design Philosophy**: With modularity and loose coupling at its core, it pursues rich functional modules, simple and easy-to-use interfaces, detailed development documentation, and convenient maintenance methods. By unifying frameworks and components, it reduces the cost of technology selection, follows development specifications and design patterns, builds a powerful code hierarchical model, and comes with comprehensive local language support. It is specifically tailored for team and enterprise development scenarios.
 
@@ -49,7 +49,7 @@ English | [简体中文](./README.md)
 ## 📦 Engineering Structure Overview
 
 ```sh
-fastapi_vue3_admin
+FastapiAdmin
 ├─ backend               # Backend project (FastAPI + Python)
 ├─ frontend              # Web frontend project (Vue3 + Element Plus)
 ├─ fastapp               # Mobile project (UniApp + Wot Design Uni)
@@ -114,9 +114,9 @@ fastapi_vue3_admin
 
 ```bash
 # Clone the repository to your local machine
-git clone https://gitee.com/tao__tao/fastapi_vue3_admin.git
+git clone https://gitee.com/tao__tao/FastapiAdmin.git
 # Or
-git clone https://github.com/1014TaoTao/fastapi_vue3_admin.git
+git clone https://github.com/1014TaoTao/FastapiAdmin.git
 ```
 
 ### Backend Setup
@@ -360,8 +360,8 @@ For more details, please check the [Official Documentation](https://service.fast
 
 ## 👥 Contributors
 
-<a href="https://github.com/1014TaoTao/fastapi_vue3_admin/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=1014TaoTao/fastapi_vue3_admin"/>
+<a href="https://github.com/1014TaoTao/FastapiAdmin/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=1014TaoTao/FastapiAdmin"/>
 </a>
 
 ## 🙏 Special Thanks
@@ -389,4 +389,4 @@ Thanks to the contributions and support of the following open-source projects:
 
 If you like this project, please give it a ⭐️ Star to show your support! Thank you very much!
 
-[![Stargazers over time](https://starchart.cc/1014TaoTao/fastapi_vue3_admin.svg?variant=adaptive)](https://starchart.cc/1014TaoTao/fastapi_vue3_admin)
+[![Stargazers over time](https://starchart.cc/1014TaoTao/FastapiAdmin.svg?variant=adaptive)](https://starchart.cc/1014TaoTao/FastapiAdmin)

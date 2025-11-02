@@ -1,16 +1,16 @@
 ---
-# Fastapi Vue3 Admin 官网
+# FastApiAdmin 官网
 layout: home
 editLink: true
 lastUpdated: true
 
 hero:
-  name: "Fastapi Vue3 Admin"
+  name: "FastApiAdmin"
   text: "现代、开源、全栈融合的快速开发平台"
   tagline: Fastapi + Vue3 助力企业快速构建应用。
   image:
     src: /logo.png
-    alt: Fastapi Vue3 Admin
+    alt: FastApiAdmin
     style:
       borderRadius: 50%
   actions:

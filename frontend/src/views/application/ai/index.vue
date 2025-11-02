@@ -33,9 +33,9 @@
             <p class="welcome-subtitle">我是您的专属AI助手，可以帮您回答问题、处理任务和进行智能对话</p>
             
             <div class="example-prompts">
-              <div class="prompt-card" @click="setPrompt('请介绍一下FastAPI Vue3 Admin系统')">
+              <div class="prompt-card" @click="setPrompt('请介绍一下FastApiAdmin系统')">
                 <h4>系统介绍</h4>
-                <p>请介绍一下FastAPI Vue3 Admin系统</p>
+                <p>请介绍一下FastApiAdmin系统</p>
               </div>
               <div class="prompt-card" @click="setPrompt('如何在系统中创建新的模块？')">
                 <h4>开发指导</h4>

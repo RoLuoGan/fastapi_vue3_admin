@@ -1,4 +1,4 @@
-# FastAPI Vue3 Admin - Backend
+# FastApiAdmin - Backend
 
 一个基于 FastAPI 的现代化后端管理系统，为前端 Vue3 管理系统提供完整的 API 服务支持。
 
@@ -42,7 +42,7 @@
 ## 📁 项目结构
 
 ```txt
-fastapi_vue3_admin/backend/
+FastapiAdmin/backend/
 ├── 📁 app/                     # 项目核心代码
 │   ├── 💾 alembic/             # 数据库迁移管理
 │   ├── 🌐 api/                 # API 接口模块
@@ -97,7 +97,7 @@ module_*/
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd fastapi_vue3_admin/backend
+cd FastapiAdmin/backend
 
 # 创建虚拟环境（推荐）
 python3 -m venv venv

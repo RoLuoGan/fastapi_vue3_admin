@@ -2976,8 +2976,8 @@ COPY public.system_menu (id, name, type, "order", status, permission, icon, rout
 --
 
 COPY public.system_notice (notice_title, notice_type, notice_content, status, creator_id, id, description, created_at, updated_at) FROM stdin;
-系统通知	1	维护通知：2025-10-01 fastapi_vue3_admin系统凌晨维护	t	1	1	通知	2025-10-08 04:13:49.475194	2025-10-08 04:13:49.475196
-系统公告	2	温馨提醒：2025-10-01 fastapi_vue3_admin新版本发布啦	t	1	2	公告	2025-10-08 04:13:49.475197	2025-10-08 04:13:49.475197
+系统通知	1	维护通知：2025-10-01 FastapiAdmin系统凌晨维护	t	1	1	通知	2025-10-08 04:13:49.475194	2025-10-08 04:13:49.475196
+系统公告	2	温馨提醒：2025-10-01 FastapiAdmin新版本发布啦	t	1	2	公告	2025-10-08 04:13:49.475197	2025-10-08 04:13:49.475197
 \.
 
 
@@ -2986,17 +2986,17 @@ COPY public.system_notice (notice_title, notice_type, notice_content, status, cr
 --
 
 COPY public.system_param (config_name, config_key, config_value, config_type, status, creator_id, id, description, created_at, updated_at) FROM stdin;
-网站名称	sys_web_title	FastAPI Vue3 Admin	t	t	1	1	网站名称	2025-10-08 04:13:49.454738	2025-10-08 04:13:49.454739
-网站描述	sys_web_description	FastAPI Vue3 Admin 是完全开源的权限管理系统	t	t	1	2	网站描述	2025-10-08 04:13:49.45474	2025-10-08 04:13:49.454741
+网站名称	sys_web_title	FastApiAdmin	t	t	1	1	网站名称	2025-10-08 04:13:49.454738	2025-10-08 04:13:49.454739
+网站描述	sys_web_description	FastApiAdmin 是完全开源的权限管理系统	t	t	1	2	网站描述	2025-10-08 04:13:49.45474	2025-10-08 04:13:49.454741
 网页图标	sys_web_favicon	https://service.fastapiadmin.com/api/v1/static/image/favicon.png	t	t	1	3	网页图标	2025-10-08 04:13:49.454741	2025-10-08 04:13:49.454741
 网站Logo	sys_web_logo	https://service.fastapiadmin.com/api/v1/static/image/logo.png	t	t	1	4	网站Logo	2025-10-08 04:13:49.454742	2025-10-08 04:13:49.454742
 登录背景	sys_login_background	https://service.fastapiadmin.com/api/v1/static/image/background.svg	t	t	1	5	登录背景	2025-10-08 04:13:49.454743	2025-10-08 04:13:49.454743
 版权信息	sys_web_copyright	Copyright © 2025-2026 service.fastapiadmin.com 版权所有	t	t	1	6	版权信息	2025-10-08 04:13:49.454743	2025-10-08 04:13:49.454744
 备案信息	sys_keep_record	陕ICP备2025069493号-1	t	t	1	7	备案信息	2025-10-08 04:13:49.454744	2025-10-08 04:13:49.454744
 帮助文档	sys_help_doc	https://service.fastapiadmin.com	t	t	1	8	帮助文档	2025-10-08 04:13:49.454745	2025-10-08 04:13:49.454745
-隐私政策	sys_web_privacy	https://github.com/1014TaoTao/fastapi_vue3_admin/blob/master/LICENSE	t	t	1	9	隐私政策	2025-10-08 04:13:49.454746	2025-10-08 04:13:49.454746
-用户协议	sys_web_clause	https://github.com/1014TaoTao/fastapi_vue3_admin/blob/master/LICENSE	t	t	1	10	用户协议	2025-10-08 04:13:49.454746	2025-10-08 04:13:49.454747
-源码代码	sys_git_code	https://github.com/1014TaoTao/fastapi_vue3_admin.git	t	t	1	11	源码代码	2025-10-08 04:13:49.454747	2025-10-08 04:13:49.454747
+隐私政策	sys_web_privacy	https://github.com/1014TaoTao/FastapiAdmin/blob/master/LICENSE	t	t	1	9	隐私政策	2025-10-08 04:13:49.454746	2025-10-08 04:13:49.454746
+用户协议	sys_web_clause	https://github.com/1014TaoTao/FastapiAdmin/blob/master/LICENSE	t	t	1	10	用户协议	2025-10-08 04:13:49.454746	2025-10-08 04:13:49.454747
+源码代码	sys_git_code	https://github.com/1014TaoTao/FastapiAdmin.git	t	t	1	11	源码代码	2025-10-08 04:13:49.454747	2025-10-08 04:13:49.454747
 项目版本	sys_web_version	2.0.0	t	t	1	12	项目版本	2025-10-08 04:13:49.454748	2025-10-08 04:13:49.454748
 演示模式启用	demo_enable	false	t	t	1	13	是否开启演示模式	2025-10-08 04:13:49.454749	2025-10-08 04:13:49.454749
 演示访问IP白名单	ip_white_list	["127.0.0.1"]	t	t	1	14	演示模式IP白名单列表	2025-10-08 04:13:49.45475	2025-10-08 04:13:49.45475

@@ -19,9 +19,9 @@ title: 关于我们
 
 ## 🌐 社区
 
-- [GitHub](https://github.com/1014TaoTao/fastapi_vue3_admin)
-- [Gitee](https://gitee.com/tao__tao/fastapi_vue3_admin)
-- [GitCode](https://gitcode.com/qq_36002987/fastapi_vue3_admin)
+- [GitHub](https://github.com/1014TaoTao/FastapiAdmin)
+- [Gitee](https://gitee.com/tao__tao/FastapiAdmin)
+- [GitCode](https://gitcode.com/qq_36002987/FastapiAdmin)
 
 ## 扫码交流
 

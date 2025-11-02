@@ -1,13 +1,13 @@
 ---
 title: 前端开发指南
 ---
-# FastAPI Vue3 Admin 项目前端
+# FastApiAdmin 项目前端
 
 ## 📖 项目介绍
 
 ### 项目概述
 
-**FastAPI Vue3 Admin** 前端是一个基于 Vue3 + Vite + TypeScript + Element-Plus 构建的现代化后台管理系统前端模板。
+**FastApiAdmin** 前端是一个基于 Vue3 + Vite + TypeScript + Element-Plus 构建的现代化后台管理系统前端模板。
 
 + 🎨 **现代化技术栈**：Vue 3 + TypeScript + Vite + Element Plus
 + 🚀 **高性能**：Vite 构建，快速热重载
@@ -101,7 +101,7 @@ title: 前端开发指南
 
 ```bash
 # 应用配置
-VITE_APP_TITLE=FastAPI Vue3 Admin
+VITE_APP_TITLE=FastApiAdmin
 VITE_APP_ENV=development
 
 # API 配置
@@ -117,7 +117,7 @@ VITE_APP_PUBLIC_PATH=/
 
 ```bash
 # 应用配置
-VITE_APP_TITLE=FastAPI Vue3 Admin
+VITE_APP_TITLE=FastApiAdmin
 VITE_APP_ENV=production
 
 # API 配置
@@ -133,7 +133,7 @@ VITE_APP_PUBLIC_PATH=/
 
 ```bash
 # 应用配置
-VITE_APP_TITLE=FastAPI Vue3 Admin Test
+VITE_APP_TITLE=FastApiAdmin Test
 VITE_APP_ENV=test
 
 # API 配置
@@ -162,7 +162,7 @@ export const config = {
 ### 完整目录结构
 
 ```plain
-fastapi_vue3_admin/frontend/
+FastapiAdmin/frontend/
 ├── 📁 .husky/                 # Git Hooks 配置
 │   ├── pre-commit            # 提交前钩子
 │   ├── commit-msg            # 提交信息钩子
@@ -650,7 +650,7 @@ app.mount('#app')
 ```typescript
 export const settings = {
   // 应用信息
-  title: 'FastAPI Vue3 Admin',
+  title: 'FastApiAdmin',
   version: '2.0.0',
 
   // 显示配置
@@ -1245,12 +1245,12 @@ pnpm run clean:cache
 
 1. **克隆项目**
    ```bash
-   git clone https://gitee.com/tao__tao/fastapi_vue3_admin.git
+   git clone https://gitee.com/tao__tao/FastapiAdmin.git
    ```
 
 2. **进入前端目录**
    ```bash
-   cd fastapi_vue3_admin/frontend
+   cd FastapiAdmin/frontend
    ```
 
 3. **安装依赖**
@@ -1274,7 +1274,7 @@ pnpm run clean:cache
 
 ### 系统特性
 
-**FastAPI Vue3 Admin** 采用 **动态路由 + 动态菜单** 的设计模式，具有以下优势：
+**FastApiAdmin** 采用 **动态路由 + 动态菜单** 的设计模式，具有以下优势：
 
 #### ✅ 优势特点
 
@@ -2500,7 +2500,7 @@ export default defineConfig({
 
 ## 🎯 总结
 
-**FastAPI Vue3 Admin** 前端项目提供了一套完整的企业级后台管理系统解决方案，具有以下优势：
+**FastApiAdmin** 前端项目提供了一套完整的企业级后台管理系统解决方案，具有以下优势：
 
 1. **现代化技术栈**：基于 Vue3、Vite、TypeScript 等前沿技术构建
 2. **高度模块化**：清晰的项目结构，便于维护和扩展
