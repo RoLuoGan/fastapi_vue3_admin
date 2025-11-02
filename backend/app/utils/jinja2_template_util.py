@@ -1,6 +1,7 @@
 # -*- coding:utf-8 -*-
 
 import json
+import os
 from datetime import datetime
 from jinja2.environment import Environment
 from jinja2 import Environment, FileSystemLoader, select_autoescape, Template
@@ -11,48 +12,6 @@ from app.config.setting import settings
 from app.api.v1.module_generator.gencode.schema import GenTableOutSchema, GenTableColumnOutSchema
 from app.utils.common_util import CamelCaseUtil, SnakeCaseUtil
 from app.utils.string_util import StringUtil
-
-
-class Jinja2TemplateInitializerUtil:
-    """
-    模板引擎初始化类
-    """
-
-    @classmethod
-    def init_jinja2(cls):
-        """
-        初始化 Jinja2 模板引擎。
-        
-        参数:
-        - 无
-        
-        返回:
-        - Environment: Jinja2 环境对象。
-        
-        异常:
-        - RuntimeError: 初始化失败时抛出。
-        """
-        try:
-            # 修复模板路径，使用正确的相对路径
-
-            env = Environment(
-                loader=FileSystemLoader(settings.TEMPLATE_DIR),
-                autoescape=select_autoescape(['html', 'xml', 'jinja']), # 自动转义HTML
-                trim_blocks=True,   # 删除多余的空行
-                lstrip_blocks=True,  # 删除行首空格
-                keep_trailing_newline=True,  # 保留行尾换行符
-                enable_async=True,  # 开启异步支持  
-            )
-            env.filters.update(
-                {
-                    'camel_to_snake': SnakeCaseUtil.camel_to_snake,
-                    'snake_to_camel': CamelCaseUtil.snake_to_camel,
-                    'get_sqlalchemy_type': Jinja2TemplateUtil.get_sqlalchemy_type,
-                }
-            )
-            return env
-        except Exception as e:
-            raise RuntimeError(f'初始化Jinja2模板引擎失败: {e}')
 
 
 class Jinja2TemplateUtil:
@@ -70,7 +29,7 @@ class Jinja2TemplateUtil:
     _env = None
     
     @classmethod
-    def get_env(cls) -> Environment:
+    def get_env(cls):
         """
         获取模板环境对象。
         
@@ -79,12 +38,28 @@ class Jinja2TemplateUtil:
         
         返回:
         - Environment: Jinja2 环境对象。
-        
-        异常:
-        - RuntimeError: 初始化失败时抛出。
         """
         if cls._env is None:
-            cls._env = Jinja2TemplateInitializerUtil.init_jinja2()
+            # 确保模板目录存在
+            template_dir = settings.TEMPLATE_DIR
+            if not os.path.exists(template_dir):
+                raise RuntimeError(f'模板目录不存在: {template_dir}')
+
+            cls._env = Environment(
+                loader=FileSystemLoader(settings.TEMPLATE_DIR),
+                autoescape=select_autoescape(['html', 'xml', 'jinja']), # 自动转义HTML
+                trim_blocks=True,   # 删除多余的空行
+                lstrip_blocks=True,  # 删除行首空格
+                keep_trailing_newline=True,  # 保留行尾换行符
+                enable_async=True,  # 开启异步支持  
+            )
+            cls._env.filters.update(
+                {
+                    'camel_to_snake': SnakeCaseUtil.camel_to_snake,
+                    'snake_to_camel': CamelCaseUtil.snake_to_camel,
+                    'get_sqlalchemy_type': cls.get_sqlalchemy_type,
+                }
+            )
         return cls._env
     
     @classmethod
@@ -125,24 +100,26 @@ class Jinja2TemplateUtil:
         module_name = gen_table.module_name or ''
         business_name = gen_table.business_name or ''
         package_name = gen_table.package_name or ''
-        tpl_category = gen_table.tpl_category or ''
         function_name = gen_table.function_name or ''
         
+        # 确保pk_column不为None
+        pk_column = gen_table.pk_column
+        if pk_column is None and gen_table.columns:
+            # 如果没有明确的主键列，使用第一个列作为主键
+            pk_column = gen_table.columns[0]
+        
         context = {
-            'tpl_category': tpl_category,
             'table_name': gen_table.table_name or '',
             'function_name': function_name if StringUtil.is_not_empty(function_name) else '【请填写功能名称】',
             'class_name': class_name,
-            'className': class_name.capitalize() if class_name else '',
             'module_name': module_name,
             'business_name': business_name.capitalize() if business_name else '',
             'base_package': cls.get_package_prefix(package_name) if package_name else '',
             'package_name': package_name,
-            'author': gen_table.function_author or '',
             'datetime': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'pk_column': gen_table.pk_column,
-            'do_import_list': cls.get_do_import_list(gen_table),
-            'vo_import_list': cls.get_vo_import_list(gen_table),
+            'pk_column': pk_column,
+            'do_import_list': cls.get_import_list(gen_table, "model"),
+            'vo_import_list': cls.get_import_list(gen_table, "schema"),
             'permission_prefix': cls.get_permission_prefix(module_name, business_name),
             'columns': gen_table.columns or [],
             'table': gen_table,
@@ -150,98 +127,22 @@ class Jinja2TemplateUtil:
             'db_type': settings.DATABASE_TYPE,
             'column_not_add_show': GenConstant.COLUMNNAME_NOT_ADD_SHOW,
             'column_not_edit_show': GenConstant.COLUMNNAME_NOT_EDIT_SHOW,
-            'primary_key': gen_table.pk_column.python_field if gen_table.pk_column else ''
+            'primary_key': pk_column.python_field if pk_column else ''
         }
-
-        # 设置菜单、树形结构、子表的上下文
-        cls.set_menu_context(context, gen_table)
-        if tpl_category == GenConstant.TPL_TREE:
-            cls.set_tree_context(context, gen_table)
-        if tpl_category == GenConstant.TPL_SUB:
-            cls.set_sub_context(context, gen_table)
 
         return context
     
-    @classmethod
-    def set_menu_context(cls, context: Dict, gen_table: GenTableOutSchema):
-        """
-        设置菜单上下文。
-        
-        参数:
-        - context (Dict): 模板上下文字典。
-        - gen_table (GenTableOutSchema): 生成表的配置信息。
-        
-        返回:
-        - Dict: 更新后的模板上下文字典。
-        """
-        # 处理options为None的情况
-        options = gen_table.options or '{}'
-        try:
-            params_obj = json.loads(options)
-        except json.JSONDecodeError:
-            params_obj = {}
-        context['parent_menu_id'] = cls.get_parent_menu_id(params_obj)
-    
-    @classmethod
-    def set_tree_context(cls, context: Dict, gen_table: GenTableOutSchema):
-        """
-        设置树形结构上下文。
-        
-        参数:
-        - context (Dict): 模板上下文字典。
-        - gen_table (GenTableOutSchema): 生成表的配置信息。
-        
-        返回:
-        - Dict: 更新后的模板上下文字典。
-        """
-        # 处理options为None的情况
-        options = gen_table.options or '{}'
-        try:
-            params_obj = json.loads(options)
-        except json.JSONDecodeError:
-            params_obj = {}
-        context['tree_code'] = cls.get_tree_code(params_obj)
-        context['tree_parent_code'] = cls.get_tree_parent_code(params_obj)
-        context['tree_name'] = cls.get_tree_name(params_obj)
-        context['expand_column'] = cls.get_expand_column(gen_table)
-    
-    @classmethod
-    def set_sub_context(cls, context: Dict, gen_table: GenTableOutSchema):
-        """
-        设置子表上下文。
-        """
-        sub_table = gen_table.sub_table
-        sub_table_name = gen_table.sub_table_name or ''
-        sub_table_fk_name = gen_table.sub_table_fk_name or ''
-        # 修复：避免重复的条件判断，清晰处理None
-        sub_class_name = sub_table.class_name if sub_table else ''
-        sub_table_fk_class_name = CamelCaseUtil.snake_to_camel(sub_table_fk_name) if sub_table_fk_name else ''
-        context['sub_table'] = sub_table
-        context['sub_table_name'] = sub_table_name
-        context['sub_table_fk_name'] = sub_table_fk_name
-        context['sub_table_fk_class_name'] = sub_table_fk_class_name
-        context['sub_table_fk_class_name_lower'] = sub_table_fk_class_name.lower() if sub_table_fk_class_name else ''
-        context['sub_class_name'] = sub_class_name
-        context['sub_class_name_lower'] = sub_class_name.lower() if sub_class_name else ''
 
     @classmethod
-    def get_template_list(cls, tpl_category: str, tpl_web_type: str):
+    def get_template_list(cls):
         """
         获取模板列表。
         
         参数:
-        - tpl_category (str): 生成模板类型。
-        - tpl_web_type (str): 前端类型。
-        
+        - 无
         返回:
         - List[str]: 模板路径列表。
         """
-        use_web_type = 'vue'
-        # 处理空值情况
-        if tpl_web_type and tpl_web_type == 'element-plus':
-            use_web_type = 'vue'
-        # 处理空值情况
-        category = tpl_category or GenConstant.TPL_CRUD
         templates = [
             'python/controller.py.j2',
             'python/service.py.j2',
@@ -251,13 +152,8 @@ class Jinja2TemplateUtil:
             'python/model.py.j2',
             'sql/sql.sql.j2',
             'ts/api.ts.j2',
+            'vue/index.vue.j2',
         ]
-        if category == GenConstant.TPL_CRUD:
-            templates.append(f'{use_web_type}/index.vue.j2')
-        elif category == GenConstant.TPL_TREE:
-            templates.append(f'{use_web_type}/index-tree.vue.j2')
-        elif category == GenConstant.TPL_SUB:
-            templates.append(f'{use_web_type}/index.vue.j2')
         return templates
     
     @classmethod
@@ -268,39 +164,41 @@ class Jinja2TemplateUtil:
         参数:
         - template (str): 模板路径字符串。
         - gen_table (GenTableOutSchema): 生成表的配置信息。
-        
+
         返回:
         - str: 模板生成的文件名。
+        
+        异常:
+        - ValueError: 当无法生成有效文件名时抛出。
         """
-        package_name = gen_table.package_name or ''
         module_name = gen_table.module_name or ''
         business_name = gen_table.business_name or ''
+        
+        # 验证必要的参数
+        if not module_name or not business_name:
+            raise ValueError(f"无法为模板 {template} 生成文件名：模块名或业务名未设置")
 
-        vue_path = cls.FRONTEND_PROJECT_PATH
-        python_path = cls.BACKEND_PROJECT_PATH
-
-        if 'controller.py.j2' in template:
-            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/controller.py'
-        elif 'crud.py.j2' in template:
-            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/crud.py'
-        elif 'model.py.j2' in template:
-            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/model.py'
-        elif 'service.py.j2' in template:
-            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/service.py'
-        elif 'param.py.j2' in template:
-            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/param.py'
-        elif 'schema.py.j2' in template:
-            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/schema.py'
-        elif 'sql.sql.j2' in template:
-            return f'{python_path}/sql/module_{module_name}/{business_name}_menu.sql'
-        elif 'api.ts.j2' in template:
-            return f'{vue_path}/src/api/module_{module_name}/{business_name}.ts'
-        elif 'index.vue.j2' in template:
-            return f'{vue_path}/src/views/module_{module_name}/{business_name}/index.vue'
-        elif 'index-tree.vue.j2' in template:
-            # 修复：树形模板生成到专用文件名
-            return f'{vue_path}/src/views/module_{module_name}/{business_name}/index-tree.vue'
-        return ''
+        # 映射表方式简化
+        template_mapping = {
+            'controller.py.j2': f'{cls.BACKEND_PROJECT_PATH}/app/api/v1/module_{module_name}/{business_name}/controller.py',
+            'service.py.j2': f'{cls.BACKEND_PROJECT_PATH}/app/api/v1/module_{module_name}/{business_name}/service.py',
+            'crud.py.j2': f'{cls.BACKEND_PROJECT_PATH}/app/api/v1/module_{module_name}/{business_name}/crud.py',
+            'model.py.j2': f'{cls.BACKEND_PROJECT_PATH}/app/api/v1/module_{module_name}/{business_name}/model.py',
+            'param.py.j2': f'{cls.BACKEND_PROJECT_PATH}/app/api/v1/module_{module_name}/{business_name}/param.py',
+            'schema.py.j2': f'{cls.BACKEND_PROJECT_PATH}/app/api/v1/module_{module_name}/{business_name}/schema.py',
+            'sql.sql.j2': f'{cls.BACKEND_PROJECT_PATH}/sql/module_{module_name}/{business_name}_menu.sql',
+            'api.ts.j2': f'{cls.FRONTEND_PROJECT_PATH}/src/api/module_{module_name}/{business_name}.ts',
+            'index.vue.j2': f'{cls.FRONTEND_PROJECT_PATH}/src/views/module_{module_name}/{business_name}/index.vue'
+        }
+        
+        # 查找匹配的模板路径
+        for key, path in template_mapping.items():
+            if key in template:
+                return path
+        
+        # 默认处理
+        template_name = template.split('/')[-1].replace('.j2', '')
+        return f'{cls.BACKEND_PROJECT_PATH}/generated/{template_name}'
 
     @classmethod
     def get_package_prefix(cls, package_name: str) -> str:
@@ -317,72 +215,42 @@ class Jinja2TemplateUtil:
         return package_name[: package_name.rfind('.')] if '.' in package_name else package_name
 
     @classmethod
-    def get_vo_import_list(cls, gen_table: GenTableOutSchema):
+    def get_import_list(cls, gen_table: GenTableOutSchema, model_type: str):
         """
-        获取 VO 模板导入包列表。
+        获取导入包列表。
 
         参数:
         - gen_table (GenTableOutSchema): 生成表的配置信息。
+        - model_type (str): 模型类型 ("model" 或 "schema")
         
         返回:
         - List[str]: 导入包列表。
         """
         columns = gen_table.columns or []
         import_list = set()
+        
+        if model_type == "model":
+            import_list.add('from sqlalchemy import Column')
+            
         for column in columns:
-            # 处理column_type为None的情况
             column_type = column.column_type or ''
-            if column_type in GenConstant.TYPE_DATE:
-                import_list.add(f'from datetime import {column_type}')
-            elif column_type == GenConstant.TYPE_DECIMAL:
-                import_list.add('from decimal import Decimal')
-        if gen_table.sub and gen_table.sub_table:
-            # 处理sub_table.columns为None的情况
-            sub_columns = gen_table.sub_table.columns or []
-            for sub_column in sub_columns:
-                # 处理sub_column.column_type为None的情况
-                sub_column_type = sub_column.column_type or ''
-                if sub_column_type in GenConstant.TYPE_DATE:
-                    import_list.add(f'from datetime import {sub_column_type}')
-                elif sub_column_type == GenConstant.TYPE_DECIMAL:
+            if model_type == "schema":
+                # Schema特定导入逻辑
+                if column_type in GenConstant.TYPE_DATE:
+                    import_list.add(f'from datetime import {column_type}')
+                elif column_type == GenConstant.TYPE_DECIMAL:
                     import_list.add('from decimal import Decimal')
-        return cls.merge_same_imports(list(import_list), 'from datetime import')
-    
-    @classmethod
-    def get_do_import_list(cls, gen_table: GenTableOutSchema) -> List[str]:
-        """
-        获取 DO 模板导入包列表。
-
-        参数:
-        - gen_table (GenTableOutSchema): 生成表的配置信息。
-        
-        返回:
-        - List[str]: 导入包列表。
-        """
-        columns = gen_table.columns or []
-        import_list = set()
-        import_list.add('from sqlalchemy import Column')
-        for column in columns:
-            # 处理column.column_type为None的情况
-            column_type = column.column_type or ''
-            data_type = cls.get_db_type(column_type)
-            if data_type in GenConstant.COLUMNTYPE_GEOMETRY:
-                import_list.add('from geoalchemy2 import Geometry')
-            import_list.add(
-                f'from sqlalchemy import {StringUtil.get_mapping_value_by_key_ignore_case(GenConstant.DB_TO_SQLALCHEMY, data_type)}'
-            )
-        if gen_table.sub and gen_table.sub_table:
-            import_list.add('from sqlalchemy import ForeignKey')
-            # 处理sub_table.columns为None的情况
-            sub_columns = gen_table.sub_table.columns or []
-            for sub_column in sub_columns:
-                # 处理sub_column.column_type为None的情况
-                sub_column_type = sub_column.column_type or ''
-                data_type = cls.get_db_type(sub_column_type)
-                import_list.add(
-                    f'from sqlalchemy import {StringUtil.get_mapping_value_by_key_ignore_case(GenConstant.DB_TO_SQLALCHEMY, data_type)}'
-                )
-        return cls.merge_same_imports(list(import_list), 'from sqlalchemy import')
+            else:  # model
+                # Model特定导入逻辑
+                data_type = cls.get_db_type(column_type)
+                if data_type in GenConstant.COLUMNTYPE_GEOMETRY:
+                    import_list.add('from geoalchemy2 import Geometry')
+                sqlalchemy_type = GenConstant.DB_TO_SQLALCHEMY.get(data_type)
+                if sqlalchemy_type:
+                    import_list.add(f'from sqlalchemy import {sqlalchemy_type}')
+                    
+        return cls.merge_same_imports(list(import_list), 
+                                      'from datetime import' if model_type == "schema" else 'from sqlalchemy import')
 
     @classmethod
     def get_db_type(cls, column_type: str) -> str:
@@ -489,118 +357,7 @@ class Jinja2TemplateUtil:
         return f'{module_name}:{business_name}'
     
     @classmethod
-    def get_parent_menu_id(cls, params_obj: Dict):
-        """
-        获取上级菜单ID。
-
-        参数:
-        - params_obj (Dict): 菜单参数字典。
-        
-        返回:
-        - str: 上级菜单ID。
-        """
-        if params_obj and params_obj.get(GenConstant.PARENT_MENU_ID):
-            return params_obj.get(GenConstant.PARENT_MENU_ID)
-        return cls.DEFAULT_PARENT_MENU_ID
-    
-    @classmethod
-    def get_tree_code(cls, params_obj: Dict):
-        """
-        获取树编码。
-
-        参数:
-        - params_obj (Dict): 菜单参数字典。
-        
-        返回:
-        - str: 树编码（驼峰格式）。
-        """
-        if GenConstant.TREE_CODE in params_obj:
-            tree_code = params_obj.get(GenConstant.TREE_CODE)
-            # 处理tree_code为None的情况
-            if tree_code:
-                return cls.to_camel_case(str(tree_code))
-        return ''
-    
-    @classmethod
-    def get_tree_parent_code(cls, params_obj: Dict):
-        """
-        获取树父编码。
-
-        参数:
-        - params_obj (Dict): 菜单参数字典。
-        
-        返回:
-        - str: 树父编码（驼峰格式）。
-        """
-        if GenConstant.TREE_PARENT_CODE in params_obj:
-            tree_parent_code = params_obj.get(GenConstant.TREE_PARENT_CODE)
-            # 处理tree_parent_code为None的情况
-            if tree_parent_code:
-                return cls.to_camel_case(str(tree_parent_code))
-        return ''
-    
-    @classmethod
-    def get_tree_name(cls, params_obj: Dict):
-        """
-        获取树名称。
-
-        参数:
-        - params_obj (Dict): 菜单参数字典。
-        
-        返回:
-        - str: 树名称（驼峰格式）。
-        """
-        if GenConstant.TREE_NAME in params_obj:
-            tree_name = params_obj.get(GenConstant.TREE_NAME)
-            # 处理tree_name为None的情况
-            if tree_name:
-                return cls.to_camel_case(str(tree_name))
-        return ''
-    
-    @classmethod
-    def get_expand_column(cls, gen_table: GenTableOutSchema):
-        """
-        获取展开列位置序号。
-
-        参数:
-        - gen_table (GenTableOutSchema): 生成表的配置信息。
-        
-        返回:
-        - int: 展开列在列表中的序号（从 1 开始）。
-        """
-        # 处理options为None的情况
-        options = gen_table.options or '{}'
-        try:
-            params_obj = json.loads(options)
-        except json.JSONDecodeError:
-            params_obj = {}
-        tree_name = params_obj.get(GenConstant.TREE_NAME) or ''
-        num = 0
-        # 处理gen_table.columns为None的情况
-        columns = gen_table.columns or []
-        for column in columns:
-            if column.list:
-                num += 1
-                if column.column_name == tree_name:
-                    break
-        return num
-    
-    @classmethod
-    def to_camel_case(cls, text: str) -> str:
-        """
-        将字符串转换为驼峰命名。
-
-        参数:
-        - text (str): 待转换的字符串。
-        
-        返回:
-        - str: 转换后的驼峰命名字符串。
-        """
-        parts = text.split('_')
-        return parts[0] + ''.join(word.capitalize() for word in parts[1:])
-    
-    @classmethod
-    def get_sqlalchemy_type(cls, column_type):
+    def get_sqlalchemy_type(cls, column):
         """
         获取 SQLAlchemy 类型。
 
@@ -610,29 +367,10 @@ class Jinja2TemplateUtil:
         返回:
         - str: SQLAlchemy 类型字符串。
         """
-        # 适配可能传入的是对象而非字符串的情况
-        if hasattr(column_type, 'column_type'):
-            column_type_value = column_type.column_type
-        else:
-            column_type_value = str(column_type)
-            
-        if '(' in column_type_value:
-            column_type_list = column_type_value.split('(')
-            if column_type_list[0] in GenConstant.COLUMNTYPE_STR:
-                sqlalchemy_type = (
-                    StringUtil.get_mapping_value_by_key_ignore_case(
-                        GenConstant.DB_TO_SQLALCHEMY, column_type_list[0]
-                    )
-                    + '('
-                    + column_type_list[1]
-                )
-            else:
-                sqlalchemy_type = StringUtil.get_mapping_value_by_key_ignore_case(
-                    GenConstant.DB_TO_SQLALCHEMY, column_type_list[0]
-                )
-        else:
-            sqlalchemy_type = StringUtil.get_mapping_value_by_key_ignore_case(
-                GenConstant.DB_TO_SQLALCHEMY, column_type_value
-            )
-
-        return sqlalchemy_type
+        column_type = getattr(column, 'column_type', str(column))
+        if not column_type:
+            return "String"
+        
+        # 直接映射，简化逻辑
+        base_type = column_type.split('(')[0] if '(' in column_type else column_type
+        return GenConstant.DB_TO_SQLALCHEMY.get(base_type, "String")

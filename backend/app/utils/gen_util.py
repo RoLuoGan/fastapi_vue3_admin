@@ -27,15 +27,13 @@ class GenUtils:
         if gen_table.class_name is None:
             gen_table.class_name = cls.convert_class_name(gen_table.table_name or "")
         if gen_table.package_name is None:
-            gen_table.package_name = cls.get_package_name(gen_table.table_name or "")
+            gen_table.package_name = settings.package_name
         if gen_table.module_name is None:
-            gen_table.module_name = cls.get_module_name(settings.package_name or "")
+            gen_table.module_name = settings.package_name.split('.')[-1]
         if gen_table.business_name is None:
-            gen_table.business_name = cls.get_business_name(gen_table.table_name or "")
+            gen_table.business_name = gen_table.table_name.split('_')[-1]
         if gen_table.function_name is None:
-            gen_table.function_name = cls.replace_text(gen_table.table_comment or "")
-        if gen_table.function_author is None:
-            gen_table.function_author = settings.author
+            gen_table.function_name = re.sub(r'(?:表|测试)', '', gen_table.table_comment or "")
 
     @classmethod
     def init_column_field(cls, column: GenTableColumnSchema, table: GenTableSchema) -> None:
@@ -82,60 +80,37 @@ class GenUtils:
                 column.html_type = GenConstant.HTML_DATETIME
             elif cls.arrays_contains(GenConstant.COLUMNTYPE_NUMBER, data_type):
                 column.html_type = GenConstant.HTML_INPUT
+            elif column_name.lower().endswith("status"):
+                column.html_type = GenConstant.HTML_RADIO
+            elif column_name.lower().endswith("type") or column_name.lower().endswith("sex"):
+                column.html_type = GenConstant.HTML_SELECT
+            elif column_name.lower().endswith("image"):
+                column.html_type = GenConstant.HTML_IMAGE_UPLOAD
+            elif column_name.lower().endswith("file"):
+                column.html_type = GenConstant.HTML_FILE_UPLOAD
+            elif column_name.lower().endswith("content"):
+                column.html_type = GenConstant.HTML_EDITOR
             else:
                 column.html_type = GenConstant.HTML_INPUT
-
-        # 基于字段命名语义的控件类型覆写（若已设为通用input/textarea则按语义更精确的控件替换）
-        # 这些覆写通常比类型映射更贴近业务含义
-        if column_name.lower().endswith("status"):
-            column.html_type = GenConstant.HTML_RADIO
-        elif column_name.lower().endswith("type") or column_name.lower().endswith("sex"):
-            column.html_type = GenConstant.HTML_SELECT
-        elif column_name.lower().endswith("image"):
-            column.html_type = GenConstant.HTML_IMAGE_UPLOAD
-        elif column_name.lower().endswith("file"):
-            column.html_type = GenConstant.HTML_FILE_UPLOAD
-        elif column_name.lower().endswith("content"):
-            column.html_type = GenConstant.HTML_EDITOR
 
         # 只有当is_insert为None时才设置插入字段（默认所有字段都需要插入）
         if column.is_insert is None:
             column.is_insert = GenConstant.REQUIRE
 
         # 只有当is_edit为None时才设置编辑字段
-        if column.is_edit is None and not cls.arrays_contains(GenConstant.COLUMNNAME_NOT_EDIT, column_name) and not column.is_pk == '1':
+        if column.is_edit is None and not cls.arrays_contains(GenConstant.COLUMNNAME_NOT_EDIT, column_name) and not (column.is_pk is not None and column.is_pk == GenConstant.REQUIRE):
             column.is_edit = GenConstant.REQUIRE
         # 只有当is_list为None时才设置列表字段
-        if column.is_list is None and not cls.arrays_contains(GenConstant.COLUMNNAME_NOT_LIST, column_name) and not column.is_pk == '1':
+        if column.is_list is None and not cls.arrays_contains(GenConstant.COLUMNNAME_NOT_LIST, column_name) and not (column.is_pk is not None and column.is_pk == GenConstant.REQUIRE):
             column.is_list = GenConstant.REQUIRE
         # 只有当is_query为None时才设置查询字段
-        if column.is_query is None and not cls.arrays_contains(GenConstant.COLUMNNAME_NOT_QUERY, column_name) and not column.is_pk == '1':
+        if column.is_query is None and not cls.arrays_contains(GenConstant.COLUMNNAME_NOT_QUERY, column_name) and not (column.is_pk is not None and column.is_pk == GenConstant.REQUIRE):
             column.is_query = GenConstant.REQUIRE
 
         # 只有当query_type为None时才设置查询字段类型
         if column.query_type is None:
             if column_name.lower().endswith('name'):
                 column.query_type = GenConstant.QUERY_LIKE
-
-        # 只有当html_type为None时才设置HTML类型（重复设置）
-        if column.html_type is None:
-            # 状态字段设置单选框
-            if column_name.lower().endswith('status'):
-                column.html_type = GenConstant.HTML_RADIO
-            # 类型&性别字段设置下拉框
-            elif column_name.lower().endswith('type') or column_name.lower().endswith('sex'):
-                column.html_type = GenConstant.HTML_SELECT
-            # 图片字段设置图片上传控件
-            elif column_name.lower().endswith('image'):
-                column.html_type = GenConstant.HTML_IMAGE_UPLOAD
-            # 文件字段设置文件上传控件
-            elif column_name.lower().endswith('file'):
-                column.html_type = GenConstant.HTML_FILE_UPLOAD
-            # 内容字段设置富文本控件
-            elif column_name.lower().endswith('content'):
-                column.html_type = GenConstant.HTML_EDITOR
-            else:
-                column.html_type = GenConstant.HTML_INPUT
 
     @classmethod
     def arrays_contains(cls, arr: List[str], target_value: str) -> bool:
@@ -152,45 +127,6 @@ class GenUtils:
         if target_value is None:
             return False
         return any(item.lower() == target_value.lower() for item in arr)
-
-    @classmethod
-    def get_module_name(cls, package_name: str) -> str:
-        """
-        获取模块名
-
-        参数:
-        - package_name (str): 包名。
-
-        返回:
-        - str: 模块名。
-        """
-        return package_name.split('.')[-1]
-
-    @classmethod
-    def get_package_name(cls, table_name: str) -> str:
-        """
-        获取包名
-
-        参数:
-        - table_name (str): 业务表名。
-
-        返回:
-        - str: 包名。
-        """
-        return settings.package_name  # 可配置的包名
-        
-    @classmethod
-    def get_business_name(cls, table_name: str) -> str:
-        """
-        获取业务名
-
-        参数:
-        - table_name (str): 业务表名。
-
-        返回:
-        - str: 业务名。
-        """
-        return table_name.split('_')[-1]
 
     @classmethod
     def convert_class_name(cls, table_name: str) -> str:
@@ -211,34 +147,21 @@ class GenUtils:
         return StringUtil.convert_to_camel_case(table_name)
 
     @classmethod
-    def replace_first(cls, replacement: str, search_list: List[str]) -> str:
+    def replace_first(cls, input_string: str, search_list: List[str]) -> str:
         """
         批量替换前缀
 
         参数:
-        - replacement (str): 需要被替换的字符串。
+        - input_string (str): 需要被替换的字符串。
         - search_list (List[str]): 可替换的字符串列表。
 
         返回:
         - str: 替换后的字符串。
         """
         for search_string in search_list:
-            if replacement.startswith(search_string):
-                return replacement.replace(search_string, '', 1)
-        return replacement
-
-    @classmethod
-    def replace_text(cls, text: str) -> str:
-        """
-        关键字替换
-
-        参数:
-        - text (str): 需要被替换的字符串。
-
-        返回:
-        - str: 替换后的字符串。
-        """
-        return re.sub(r'(?:表|测试)', '', text)
+            if input_string.startswith(search_string):
+                return input_string.replace(search_string, '', 1)
+        return input_string
 
     @classmethod
     def get_db_type(cls, column_type: str) -> str:
@@ -289,17 +212,3 @@ class GenUtils:
         if '(' in column_type and ')' in column_type:
             return column_type.split('(')[1].split(')')[0].split(',')
         return []
-
-    @classmethod
-    def to_camel_case(cls, text: str) -> str:
-        """
-        将字符串转换为驼峰命名
-
-        参数:
-        - text (str): 需要转换的字符串。
-
-        返回:
-        - str: 驼峰命名。
-        """
-        parts = text.split('_')
-        return parts[0] + ''.join(word.capitalize() for word in parts[1:])

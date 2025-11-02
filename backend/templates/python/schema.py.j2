@@ -25,7 +25,7 @@
 {% for vo_import in vo_import_list %}
 {{ vo_import }}
 {% endfor %}
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 {% if table.sub %}
 from typing import List, Optional
@@ -41,7 +41,9 @@ class {{ class_name }}CreateSchema(BaseModel):
     """
 
     {% for column in columns %}
+    {% if column.column_name not in ['id', 'creator_id', 'created_at', 'updated_at'] %}
     {{ column.column_name }}: Optional[{{ column.python_type }}] = Field(default=None, description='{{ column.column_comment }}')
+    {% endif %}
     {% endfor %}
 
 

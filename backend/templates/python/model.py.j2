@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-from datetime import datetime
 from typing import Optional
 from sqlalchemy import String, Integer, Text, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -18,29 +17,11 @@ class {{ class_name }}Model(CreatorMixin):
     __loader_options__ = ["creator"]
 
     {% for column in columns %}
+    {% if column.column_name not in ['id', 'creator_id', 'description', 'created_at', 'updated_at'] %}
     {{ column.column_name }}: Mapped[Optional[{{ column.python_type }}]] = mapped_column({{ column.column_type|get_sqlalchemy_type }}, {% if column.pk %}primary_key=True, {% endif %}{% if column.increment %}autoincrement=True, {% endif %}{% if column.required or column.pk %}nullable=False{% else %}nullable=True{% endif %}, comment='{{ column.column_comment }}')
+    {% endif %}
     {% endfor %}
 
     {% if table.sub %}
     {{ sub_class_name }}_list = relationship('{{ sub_class_name }}', back_populates='{{ business_name }}')
     {% endif %}
-    
-        
-{% if sub_table %}
-
-class {{ sub_class_name }}(CreatorMixin):
-    """
-    {{ sub_table.function_name }}表
-    """
-    __tablename__ = '{{ sub_table_name }}'
-    __table_args__ = {'comment': '{{ sub_table.function_name }}'}
-    
-    {% for column in sub_table.columns %}
-    {{ column.column_name }}: Mapped[Optional[{{ column.python_type }}]] = mapped_column({{ column.column_type | get_sqlalchemy_type }}, {% if column.column_name == sub_table_fk_name %}ForeignKey('{{ table_name }}.{{ sub_table_fk_name }}'), {% endif %}{% if column.pk %}primary_key=True, {% endif %}{% if column.increment %}autoincrement=True, {% endif %}{% if column.required %}nullable=True{% else %}nullable=False{% endif %}, comment='{{ column.column_comment }}')
-    {% endfor %}
-
-    {% if table.sub %}
-    {{ business_name }} = relationship('{{ class_name }}', back_populates='{{ sub_class_name }}_list')
-    {% endif %}
-
-{% endif %}

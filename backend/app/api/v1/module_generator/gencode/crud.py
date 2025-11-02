@@ -15,7 +15,6 @@ from .schema import (
     GenTableOutSchema,
     GenTableColumnSchema,
     GenTableColumnOutSchema,
-    GenTableColumnDeleteSchema,
     GenDBTableSchema,
 )
 
@@ -452,6 +451,7 @@ class GenTableColumnCRUD(CRUDBase[GenTableColumnModel, GenTableColumnSchema, Gen
                 WHERE 
                     table_schema = (SELECT DATABASE())
                     AND table_name = :table_name
+                ORDER BY ordinal_position
             """
         else:
             # 修复SQLite查询语句，使用PRAGMA获取表结构信息
@@ -466,6 +466,7 @@ class GenTableColumnCRUD(CRUDBase[GenTableColumnModel, GenTableColumnSchema, Gen
                     type as column_type
                 FROM 
                     pragma_table_info(:table_name)
+                ORDER BY cid
             """
         
         query = text(query_sql).bindparams(table_name=table_name)
@@ -539,13 +540,13 @@ class GenTableColumnCRUD(CRUDBase[GenTableColumnModel, GenTableColumnSchema, Gen
         if column_ids:
             await self.delete(ids=column_ids)
 
-    async def delete_gen_table_column_by_column_id_dao(self, data: GenTableColumnDeleteSchema) -> None:
+    async def delete_gen_table_column_by_column_id_dao(self, column_ids: List[int]) -> None:
         """根据业务表字段ID批量删除业务表字段。
 
         参数:
-        - data (GenTableColumnDeleteSchema): 业务表字段删除模型。
+        - column_ids (List[int]): 业务表字段ID列表。
 
         返回:
         - None
         """
-        return await self.delete(ids=data.column_ids)
+        return await self.delete(ids=column_ids)

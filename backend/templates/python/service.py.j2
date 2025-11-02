@@ -52,15 +52,34 @@ class {{ class_name }}Service:
     @classmethod
     async def create_service(cls, auth: AuthSchema, data: {{ class_name }}CreateSchema) -> Dict:
         """创建"""
+        # 检查唯一性约束
+        {% for column in columns %}
+        {% if column.is_unique == '1' %}
+        obj = await {{ class_name }}CRUD(auth).get({{ column.column_name }}=data.{{ column.column_name }})
+        if obj:
+            raise CustomException(msg='创建失败，{{ column.column_comment }}已存在')
+        {% endif %}
+        {% endfor %}
         obj = await {{ class_name }}CRUD(auth).create_crud(data=data)
         return {{ class_name }}OutSchema.model_validate(obj).model_dump()
     
     @classmethod
     async def update_service(cls, auth: AuthSchema, id: int, data: {{ class_name }}UpdateSchema) -> Dict:
         """更新"""
+        # 检查数据是否存在
         obj = await {{ class_name }}CRUD(auth).get_by_id_crud(id=id)
         if not obj:
             raise CustomException(msg='更新失败，该数据不存在')
+        
+        # 检查唯一性约束
+        {% for column in columns %}
+        {% if column.is_unique == '1' %}
+        exist_obj = await {{ class_name }}CRUD(auth).get({{ column.column_name }}=data.{{ column.column_name }})
+        if exist_obj and exist_obj.id != id:
+            raise CustomException(msg='更新失败，{{ column.column_comment }}重复')
+        {% endif %}
+        {% endfor %}
+            
         obj = await {{ class_name }}CRUD(auth).update_crud(id=id, data=data)
         return {{ class_name }}OutSchema.model_validate(obj).model_dump()
     
@@ -127,6 +146,15 @@ class {{ class_name }}Service:
             
             df.rename(columns=header_dict, inplace=True)
             
+            # 验证必填字段
+            {% for column in columns %}
+            {% if column.required == '1' %}
+            missing_rows = df[df['{{ column.column_name }}'].isnull()].index.tolist()
+            if missing_rows:
+                raise CustomException(msg="{{ column.column_comment }}不能为空，第{0}行".format([i+1 for i in missing_rows]))
+            {% endif %}
+            {% endfor %}
+            
             error_msgs = []
             success_count = 0
             count = 0
@@ -141,6 +169,21 @@ class {{ class_name }}Service:
                     }
                     # 使用CreateSchema做校验后入库
                     create_schema = {{ class_name }}CreateSchema.model_validate(data)
+                    
+                    # 检查唯一性约束
+                    {% for column in columns %}
+                    {% if column.is_unique == '1' %}
+                    exists_obj = await {{ class_name }}CRUD(auth).get({{ column.column_name }}=create_schema.{{ column.column_name }})
+                    if exists_obj:
+                        if update_support:
+                            await {{ class_name }}CRUD(auth).update(id=exists_obj.id, data=create_schema)
+                            success_count += 1
+                        else:
+                            error_msgs.append(f"第{count}行: {{ column.column_comment }} {create_schema.{{ column.column_name }}} 已存在")
+                        continue
+                    {% endif %}
+                    {% endfor %}
+                    
                     await {{ class_name }}CRUD(auth).create_crud(data=create_schema)
                     success_count += 1
                 except Exception as e:
@@ -164,8 +207,19 @@ class {{ class_name }}Service:
             '{{ column.column_comment }}',
             {% endfor %}
         ]
+        selector_header_list = []
+        option_list = []
+        
+        # 添加下拉选项
+        {% for column in columns %}
+        {% if column.html_type == 'select' and column.dict_type %}
+        selector_header_list.append('{{ column.column_comment }}')
+        option_list.append({'{{ column.column_comment }}': []})  # 这里应该从字典中获取选项
+        {% endif %}
+        {% endfor %}
+        
         return ExcelUtil.get_excel_template(
             header_list=header_list,
-            selector_header_list=[],
-            option_list=[]
+            selector_header_list=selector_header_list,
+            option_list=option_list
         )

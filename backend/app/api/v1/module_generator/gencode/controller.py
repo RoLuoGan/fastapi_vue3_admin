@@ -61,7 +61,7 @@ async def get_gen_db_table_list_controller(
     返回:
     - JSONResponse: 包含查询结果和分页信息的JSON响应
     """
-    result_dict_list = await GenTableService.get_gen_db_table_list_service(auth=auth, search=search, order_by=page.order_by)
+    result_dict_list = await GenTableService.get_gen_db_table_list_service(auth=auth, search=search)
     result_dict = await PaginationService.paginate(data_list=result_dict_list, page_no=page.page_no, page_size=page.page_size)
     logger.info('获取数据库表列表成功')
     return SuccessResponse(data=result_dict, msg="获取数据库表列表成功")
@@ -103,7 +103,6 @@ async def gen_table_detail_controller(
     返回:
     - JSONResponse: 包含业务表详细信息的JSON响应
     """
-    # 统一走服务层的聚合逻辑，避免控制器拼装重复代码
     gen_table_detail_result = await GenTableService.get_gen_table_detail_service(auth, table_id)
     logger.info(f'获取table_id为{table_id}的信息成功')
     return SuccessResponse(data=gen_table_detail_result, msg="获取业务表详细信息成功")
@@ -146,7 +145,6 @@ async def update_gen_table_controller(
     返回:
     - JSONResponse: 包含编辑结果的JSON响应
     """
-    await GenTableService.validate_edit(data)
     result_dict = await GenTableService.update_gen_table_service(auth, data, table_id)
     logger.info('编辑业务表信息成功')
     return SuccessResponse(data=result_dict, msg="编辑业务表信息成功")
@@ -236,7 +234,7 @@ async def preview_code_controller(
     return SuccessResponse(data=preview_code_result, msg="预览代码成功")
 
 
-@GenRouter.post("/synch_db/{table_name}", summary="同步数据库", description="同步数据库")
+@GenRouter.post("/sync_db/{table_name}", summary="同步数据库", description="同步数据库")
 async def sync_db_controller(
     table_name: str = Path(..., description="表名"),
     auth: AuthSchema = Depends(AuthPermission(["generator:db:sync"]))
