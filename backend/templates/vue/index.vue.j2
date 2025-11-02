@@ -297,7 +297,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ResultEnum } from '@/enums/api/result.enum'
 import { QuestionFilled, ArrowUp, ArrowDown, Check, CircleClose } from '@element-plus/icons-vue'
 import { formatToDateTime } from '@/utils/dateUtil'
-import {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API from '@/api/{{ module_name }}/{{ business_name }}'
+import {{ class_name }}API from '@/api/{{ module_name }}/{{ business_name }}'
 import { useDictStore } from '@/store/index'
 import SingleImageUpload from '@/components/Upload/SingleImageUpload.vue'
 import ImportModal from '@/components/CURD/ImportModal.vue'
@@ -354,7 +354,7 @@ const exportColumns = [
 const curdContentConfig = {
   permPrefix: '{{ module_name }}:{{ business_name }}',
   cols: exportColumns as any,
-  importTemplate: () => {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API.downloadTemplate(),
+  importTemplate: () => {{ class_name }}API.downloadTemplate(),
   exportsAction: async (params: any) => {
     const query: any = { ...params };
     if (typeof query.status === 'string') {
@@ -364,7 +364,7 @@ const curdContentConfig = {
     query.page_size = 9999
     const all: any[] = []
     while (true) {
-      const res = await {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API.list(query)
+      const res = await {{ class_name }}API.list(query)
       const items = res.data?.data?.items || []
       const total = res.data?.data?.total || 0
       all.push(...items)
@@ -438,7 +438,7 @@ const queryFormData = reactive({
 async function loadingData() {
   loading.value = true
   try {
-    const response = await {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API.list(queryFormData)
+    const response = await {{ class_name }}API.list(queryFormData)
     pageTableData.value = response.data.data.items
     total.value = response.data.data.total
   } catch (error) {
@@ -484,7 +484,7 @@ function handleCloseDialog() {
 async function handleOpenDialog(type: 'create' | 'update' | 'detail', id?: number) {
   dialogVisible.type = type
   if (id) {
-    const response = await {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API.detail(id)
+    const response = await {{ class_name }}API.detail(id)
     if (type === 'detail') {
       dialogVisible.title = '详情'
       Object.assign(detailFormData.value, response.data.data)
@@ -507,9 +507,9 @@ async function handleSubmit() {
       try {
         const id = formData.id
         if (id) {
-          await {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API.update(id, { id, ...formData })
+          await {{ class_name }}API.update(id, { id, ...formData })
         } else {
-          await {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API.create(formData)
+          await {{ class_name }}API.create(formData)
         }
         dialogVisible.visible = false
         handleResetQuery()
@@ -532,7 +532,7 @@ async function handleDelete(ids: number[]) {
     .then(async () => {
       try {
         loading.value = true
-        await {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API.delete(ids)
+        await {{ class_name }}API.delete(ids)
         handleResetQuery()
       } catch (error) {
         console.error(error)
@@ -555,7 +555,7 @@ async function handleMoreClick(status: boolean) {
     }).then(async () => {
       try {
         loading.value = true
-        await {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API.batchAvailable({ ids: selectIds.value, status })
+        await {{ class_name }}API.batchAvailable({ ids: selectIds.value, status })
         handleResetQuery()
       } catch (error) {
         console.error(error)
@@ -585,7 +585,7 @@ function handleOpenExportsModal() {
 // 处理上传
 const handleUpload = async (formData: FormData) => {
   try {
-    const response = await {{ business_name|replace('_', ' ')|title|replace(' ', '') }}API.import(formData)
+    const response = await {{ class_name }}API.import(formData)
     if (response.data.code === ResultEnum.SUCCESS) {
       ElMessage.success(`${response.data.msg}，${response.data.data}`)
       importDialogVisible.value = false

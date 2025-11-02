@@ -8,6 +8,10 @@ from app.core.base_schema import BaseSchema
 
 
 class GenTableOptionSchema(BaseModel):
+    """代码生成表的附加选项（存入`options`字段的JSON）。
+    - parent_menu_id：菜单归属；树模板依赖。
+    - tree_*：树形结构必需的编码/父编码/名称字段。
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -18,6 +22,9 @@ class GenTableOptionSchema(BaseModel):
 
 
 class GenDBTableSchema(BaseModel):
+    """数据库中的表信息（跨方言统一结构）。
+    - 供“导入表结构”与“同步结构”环节使用。
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -28,8 +35,9 @@ class GenDBTableSchema(BaseModel):
 
 
 class GenTableBaseSchema(BaseModel):
-    """
-    代码生成业务表创建模型
+    """代码生成业务表基础模型（创建/更新共享字段）。
+    - 说明：`params`为前端结构体，后端持久化为`options`的JSON。
+    - 模板：`tpl_category` 区分 CRUD/Tree/Sub；`tpl_web_type` 区分 element-plus 等。
     """
     model_config = ConfigDict(from_attributes=True)
 
@@ -55,8 +63,9 @@ class GenTableBaseSchema(BaseModel):
 
 
 class GenTableSchema(GenTableBaseSchema):
-    """
-    代码生成业务表更新模型
+    """代码生成业务表更新模型（扩展聚合字段）。
+    - 聚合：`columns`字段包含字段列表；`pk_column`主键字段；子表结构`sub_table`。
+    - 便捷：`sub/tree/crud`基于`tpl_category`自动推导布尔标记。
     """
 
     pk_column: Optional['GenTableColumnOutSchema'] = Field(default=None, description='主键信息')
@@ -80,11 +89,16 @@ class GenTableSchema(GenTableBaseSchema):
 
 
 class GenTableOutSchema(GenTableSchema, BaseSchema):
+    """业务表输出模型（面向控制器/前端）。
+    - 清洗：统一处理None值，保证`columns`为列表；文本字段为空字符串。
+    - 兼容：既支持传入ORM对象，也支持字典输入。
+    """
     model_config = ConfigDict(from_attributes=True)
     
     # 添加数据验证和转换的root_validator
     @model_validator(mode='before')
     def handle_null_values(cls, values):
+        """将关键字段的None转换为安全默认值，避免前端渲染异常。"""
         # 处理None值，转换为空字符串或适当的默认值
         # 检查values是否为对象而非字典
         if hasattr(values, '__dict__'):
@@ -108,8 +122,10 @@ class GenTableOutSchema(GenTableSchema, BaseSchema):
 
 
 class GenTableColumnSchema(BaseModel):
-    """
-    代码生成业务表字段创建模型
+    """代码生成业务表字段创建模型（原始字段+生成配置）。
+    - 原始：`column_name/column_type/column_comment` 等。
+    - 生成：`python_type/html_type/query_type/dict_type` 等由工具初始化。
+    - 标记：所有 is_* 字段默认使用字符串'1'表示启用，便于前端和模板处理。
     """
     model_config = ConfigDict(from_attributes=True)
 
@@ -135,6 +151,10 @@ class GenTableColumnSchema(BaseModel):
 
 
 class GenTableColumnOutSchema(GenTableColumnSchema, BaseSchema):
+    """业务表字段输出模型（布尔派生+便捷字段）。
+    - 布尔：将字符串 is_* 转为布尔 `pk/increment/...`，供前端/模板快捷使用。
+    - 便捷：`cap_python_field` 存放大驼峰字段名（模板场景常用）。
+    """
     model_config = ConfigDict(from_attributes=True)
 
     cap_python_field: Optional[str] = Field(default=None, description='字段大写形式')
@@ -151,8 +171,8 @@ class GenTableColumnOutSchema(GenTableColumnSchema, BaseSchema):
 
 
 class GenTableColumnDeleteSchema(BaseModel):
-    """
-    删除代码生成业务表字段模型
+    """删除代码生成业务表字段模型（批量）。
+    - 说明：仅包含待删除的字段ID列表。
     """
     model_config = ConfigDict(from_attributes=True)
 

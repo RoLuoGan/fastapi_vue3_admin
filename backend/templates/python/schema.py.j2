@@ -1,0 +1,59 @@
+# -*- coding:utf-8 -*-
+
+{% set pkField = pk_column.python_field %}
+{% set pk_field = pk_column.python_field | camel_to_snake %}
+{% set pkParentheseIndex = pk_column.column_comment.find("（") %}
+{% set pk_field_comment = pk_column.column_comment[:pkParentheseIndex] if pkParentheseIndex != -1 else pk_column.column_comment %}
+{% set vo_field_required = namespace(has_required=False) %}
+{% set vo_field_daterange = namespace(has_daterange=False) %}
+{% for column in columns %}
+{% if column.required %}
+    {% set vo_field_required.has_required = True %}
+{% endif %}
+{% if column.html_type == "datetime" and column.query_type == "BETWEEN" %}
+    {% set vo_field_daterange.has_daterange = True %}
+{% endif %}
+{% endfor %}
+{% set sub_vo_field_required = namespace(has_required=False) %}
+{% if table.sub %}
+{% for sub_column in subTable.columns %}
+{% if sub_column.required %}
+    {% set sub_vo_field_required.has_required = True %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% for vo_import in vo_import_list %}
+{{ vo_import }}
+{% endfor %}
+from pydantic import BaseModel, ConfigDict, Field
+
+{% if table.sub %}
+from typing import List, Optional
+{% else %}
+from typing import Optional
+{% endif %}
+
+from app.core.base_schema import BaseSchema
+
+class {{ class_name }}CreateSchema(BaseModel):
+    """
+    {{ function_name }}新增模型
+    """
+
+    {% for column in columns %}
+    {{ column.column_name }}: Optional[{{ column.python_type }}] = Field(default=None, description='{{ column.column_comment }}')
+    {% endfor %}
+
+
+class {{ class_name }}UpdateSchema({{ class_name }}CreateSchema):
+    """
+    {{ function_name }}更新模型
+    """
+    ...
+
+
+class {{ class_name }}OutSchema({{ class_name }}CreateSchema, BaseSchema):
+    """
+    {{ function_name }}响应模型
+    """
+    model_config = ConfigDict(from_attributes=True)

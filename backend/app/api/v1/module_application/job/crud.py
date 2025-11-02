@@ -150,3 +150,12 @@ class JobLogCRUD(CRUDBase[JobLogModel, JobLogCreateSchema, JobLogUpdateSchema]):
         - ids (List[int]): 定时任务日志ID列表
         """
         return await self.delete(ids=ids)
+    
+    async def clear_obj_log_crud(self) -> None:
+        """
+        清除定时任务日志
+        
+        注意:
+        - 此操作会删除所有定时任务日志,请谨慎操作
+        """
+        return await self.clear()

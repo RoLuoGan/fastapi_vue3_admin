@@ -8,6 +8,8 @@ from alembic import command
 from alembic.config import Config
 
 from app.common.enums import EnvironmentEnum
+from app.config.setting import settings
+
 
 shell_app = typer.Typer()
 
@@ -15,8 +17,6 @@ shell_app = typer.Typer()
 alembic_cfg = Config("alembic.ini")
 
 def create_app() -> FastAPI:
-    
-    from app.config.setting import settings
     from app.plugin.init_app import (
         register_middlewares,
         register_exceptions,
@@ -41,16 +41,11 @@ def create_app() -> FastAPI:
 
     return app
 
-
 @shell_app.command()
-def run(env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", help="运行环境 (dev, prod)")):
+def run(env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", help="运行环境 (dev, prod)")) -> None:
     typer.echo("项目启动中..")
     # 设置环境变量
     os.environ["ENVIRONMENT"] = env.value
-    
-    # 确保在设置环境变量后导入配置
-    from app.config.setting import settings
-    
     # 启动uvicorn服务
     uvicorn.run(
         app='main:create_app',
@@ -58,7 +53,7 @@ def run(env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", help="
     )
 
 @shell_app.command()
-def revision(message: str, env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", help="运行环境 (dev, test, prod)")):
+def revision(message: str, env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", help="运行环境 (dev, prod)")) -> None:
     """
     生成新的 Alembic 迁移脚本。
     """
@@ -67,7 +62,7 @@ def revision(message: str, env: EnvironmentEnum = typer.Option(EnvironmentEnum.D
     typer.echo(f"迁移脚本已生成: {message}")
 
 @shell_app.command()
-def upgrade(env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", help="运行环境 (dev, test, prod)")):
+def upgrade(env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", help="运行环境 (dev, prod)")) -> None:
     """
     应用最新的 Alembic 迁移。
     """
@@ -77,11 +72,8 @@ def upgrade(env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", he
 
 
 if __name__ == '__main__':
-    # 启动服务
-    # python3 main.py run --env=dev(不加默认为dev)
-    # 生成迁移
-    # python3 main.py revision "数据迁移" --env=dev(不加默认为dev)
-    # 应用迁移
-    # python3 main.py upgrade --env=dev(不加默认为dev)
     
     shell_app()
+
+    # 开发环境启动
+    # python main.py run --env=dev (不加默认为dev)

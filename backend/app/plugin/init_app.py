@@ -14,13 +14,13 @@ from fastapi.openapi.docs import (
 from app.config.setting import settings
 from app.core.ap_scheduler import SchedulerUtil
 from app.core.logger import logger
-from app.utils.common_util import import_module, import_modules_async
+from app.utils.common_util import import_module, import_modules_async, worship
+from app.utils.console import run as console_run
 from app.core.exceptions import handle_exception
+from app.core.discover import router
 from app.scripts.initialize import InitializeData
 from app.api.v1.module_system.params.service import ParamsService
 from app.api.v1.module_system.dict.service import DictDataService
-from app.api.v1 import router
-from app.utils.console import run as console_run
 
 
 @asynccontextmanager
@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, Any]:
     返回:
     - AsyncGenerator[Any, Any]: 生命周期上下文生成器。
     """
-    logger.info(settings.BANNER + '\n' + f'{settings.TITLE} 服务开始启动...')
+    logger.info(worship())
     
     await InitializeData().init_db()
     logger.info(f"✅️ 初始化 {settings.DATABASE_TYPE} 数据库初始化完成...")
@@ -46,16 +46,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[Any, Any]:
     logger.info('✅️ 初始化Redis数据字典完成...')
     await SchedulerUtil.init_system_scheduler()
     logger.info('✅️ 初始化定时任务完成...')
+    scheduler_status = SchedulerUtil.get_job_status()
+    scheduler_jobs = len(SchedulerUtil.get_all_jobs())
 
     logger.info(f'✅️ {settings.TITLE} 服务成功启动...')
     # 控制台输出优化：展示服务信息与文档地址
-    console_run(settings.SERVER_HOST, settings.SERVER_PORT, settings.RELOAD, settings.WORKERS)
+    console_run(
+        host=settings.SERVER_HOST,
+        port=settings.SERVER_PORT,
+        reload=settings.RELOAD,
+        workers=settings.WORKERS,
+        redis_ready=True,
+        scheduler_jobs=scheduler_jobs,
+        scheduler_status=scheduler_status,
+    )
 
     yield
 
     await import_modules_async(modules=settings.EVENT_LIST, desc="全局事件", app=app, status=False)
     await SchedulerUtil.close_system_scheduler()
-    logger.info(f'{settings.TITLE} 服务关闭...')
+    logger.info(f'⚠️  {settings.TITLE} 服务关闭...')
 
 def register_middlewares(app: FastAPI) -> None:
     """

@@ -126,23 +126,20 @@ cp env/dev.env.example env/dev.env
 
 ```bash
 # 生成迁移文件（仅首次或模型变更时）
-python3 main.py revision "初始化迁移" --env=dev
+python main.py revision "数据迁移" --env=dev(不加默认为dev)
 
 # 应用数据库迁移
-python3 main.py upgrade --env=dev
-
-# 初始化数据（可选，系统会自动初始化）
-python3 main.py init-data --env=dev
+python main.py upgrade --env=dev(不加默认为dev)
 ```
 
 #### 4. 启动服务
 
 ```bash
 # 开发环境启动
-python3 main.py run --env=dev
+python main.py run --env=dev (不加默认为dev)
 
 # 生产环境启动
-python3 main.py run --env=prod
+python main.py run --env=prod (不加默认为dev)
 
 # 或使用 uvicorn 直接启动
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload

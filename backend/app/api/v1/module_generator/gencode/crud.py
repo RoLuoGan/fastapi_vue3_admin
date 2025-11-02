@@ -1,9 +1,7 @@
 # -*- coding:utf-8 -*-
 
 from sqlalchemy.engine.row import Row
-from sqlalchemy import and_, delete, select, text, update
-from sqlalchemy.orm import selectinload
-from sqlglot.expressions import Expression
+from sqlalchemy import and_, select, text
 from typing import List, Optional, Sequence, Dict, Union, Any
 
 from app.core.logger import logger
@@ -45,19 +43,7 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
         返回:
         - GenTableModel | None: 业务表信息对象。
         """
-        gen_table = (
-            (
-                await self.db.execute(
-                    select(GenTableModel)
-                    .options(selectinload(GenTableModel.columns))
-                    .where(GenTableModel.id == table_id)
-                )
-            )
-            .scalars()
-            .first()
-        )
-
-        return gen_table
+        return await self.get(id=table_id, preload=preload)
 
     async def get_gen_table_by_name(self, table_name: str, preload: Optional[List[Union[str, Any]]] = None) -> Optional[GenTableModel]:
         """
@@ -70,20 +56,8 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
         返回:
         - GenTableModel | None: 业务表信息对象。
         """
-        gen_table = (
-            (
-                await self.db.execute(
-                    select(GenTableModel)
-                    .options(selectinload(GenTableModel.columns))
-                    .where(GenTableModel.table_name == table_name)
-                )
-            )
-            .scalars()
-            .first()
-        )
+        return await self.get(table_name=table_name, preload=preload)
 
-        return gen_table
-    
     async def get_gen_table_all(self, preload: Optional[List[Union[str, Any]]] = None) -> Sequence[GenTableModel]:
         """
         获取所有业务表信息。
@@ -94,14 +68,7 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
         返回:
         - Sequence[GenTableModel]: 所有业务表信息列表。
         """
-        gen_table_all = (
-            await self.db.execute(
-                select(GenTableModel)
-                .options(selectinload(GenTableModel.columns))
-                )
-            ).scalars().all()
-
-        return gen_table_all
+        return await self.list(preload=preload)
 
     async def get_gen_table_list(self, search: Optional[GenTableQueryParam] = None, preload: Optional[List[Union[str, Any]]] = None) -> Sequence[GenTableModel]:
         """
@@ -114,20 +81,13 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
         返回:
         - Sequence[GenTableModel]: 业务表列表信息。
         """
-        # 获取所有数据
-        result = await self.db.execute(
-            select(GenTableModel)
-            .options(selectinload(GenTableModel.columns))
-            .where(
-                GenTableModel.table_name.like(f"%{search.table_name}%") if search and search.table_name else GenTableModel.id.isnot(None),
-                GenTableModel.table_comment.like(f"%{search.table_comment}%") if search and search.table_comment else GenTableModel.id.isnot(None),
-            )
-            .order_by(GenTableModel.created_at.desc())
-            .distinct()
-        )
-        gen_table_all = result.scalars().all()
-
-        return gen_table_all
+        # 使用基础CRUD的list与like检索
+        search_dict: Dict = {}
+        if search and search.table_name:
+            search_dict["table_name"] = ("like", search.table_name)
+        if search and search.table_comment:
+            search_dict["table_comment"] = ("like", search.table_comment)
+        return await self.list(search=search_dict, order_by=[{"created_at": "desc"}], preload=preload)
 
     async def add_gen_table(self, add_model: GenTableSchema) -> GenTableModel:
         """
@@ -139,13 +99,8 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
         返回:
         - GenTableModel: 新增的业务表信息对象。
         """
-        gen_table = GenTableModel(
-            **add_model.model_dump(exclude_unset=True, exclude={"sub", "tree", "crud"})
-        )
-        self.db.add(gen_table)
-        await self.db.flush()
-        return gen_table
-    
+        return await self.create(add_model.model_dump(exclude_unset=True, exclude={"sub", "tree", "crud"}))
+
     async def edit_gen_table(self, table_id: int, edit_model: GenTableSchema) -> GenTableSchema:
         """
         修改业务表信息。
@@ -157,15 +112,8 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
         返回:
         - GenTableSchema: 修改后的业务表信息模型。
         """
-        edit_dict_data = edit_model.model_dump(exclude_unset=True)
-        await self.db.execute(
-            update(GenTableModel)
-            .where(GenTableModel.id == table_id)
-            .values(**edit_dict_data)
-        )
-        await self.db.flush()
-        await self.db.commit()
-        return edit_model
+        obj = await self.update(id=table_id, data=edit_model)
+        return GenTableSchema.model_validate(obj)
 
     async def delete_gen_table(self, ids: List[int]) -> None:
         """
@@ -174,11 +122,7 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
         参数:
         - ids (List[int]): 业务表ID列表。
         """
-        await self.db.execute(
-            delete(GenTableModel)
-            .where(GenTableModel.id.in_(ids))
-        )
-        await self.db.flush()
+        await self.delete(ids=ids)
 
     async def get_db_table_list(self, search: Optional[GenTableQueryParam] = None) -> list[Dict]:
         """
@@ -193,19 +137,25 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
 
         # 使用更健壮的方式检测数据库方言
         if settings.DATABASE_TYPE == "postgresql":
+            # 修复：PostgreSQL不提供table_comment，使用pg_catalog获取注释
             query_sql = (
                 select(
-                    text("table_catalog as database_name"),
-                    text("table_name as table_name"),
-                    text("table_type as table_type"),
-                    text("table_comment as table_comment"),
+                    text("t.table_catalog as database_name"),
+                    text("t.table_name as table_name"),
+                    text("t.table_type as table_type"),
+                    text("pd.description as table_comment"),
                 )
-                .select_from(text("information_schema.tables"))
+                .select_from(text(
+                    "information_schema.tables t \n"
+                    "LEFT JOIN pg_catalog.pg_class c ON c.relname = t.table_name \n"
+                    "LEFT JOIN pg_catalog.pg_namespace n ON n.nspname = t.table_schema AND c.relnamespace = n.oid \n"
+                    "LEFT JOIN pg_catalog.pg_description pd ON pd.objoid = c.oid AND pd.objsubid = 0"
+                ))
                 .where(
                     and_(
-                        text("table_catalog = (select current_database())"),
-                        text("is_insertable_into = 'YES'"),
-                        text("table_schema = 'public'"),
+                        text("t.table_catalog = (select current_database())"),
+                        text("t.is_insertable_into = 'YES'"),
+                        text("t.table_schema = 'public'"),
                     )
                 )
             )
@@ -291,19 +241,25 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
         """
         # 使用更健壮的方式检测数据库方言
         if settings.DATABASE_TYPE == "postgresql":
+            # 修复：PostgreSQL不提供table_comment，使用pg_catalog获取注释
             query_sql = (
                 select(
-                    text("table_catalog as database_name"),
-                    text("table_name as table_name"),
-                    text("table_type as table_type"),
-                    text("table_comment as table_comment"),
+                    text("t.table_catalog as database_name"),
+                    text("t.table_name as table_name"),
+                    text("t.table_type as table_type"),
+                    text("pd.description as table_comment"),
                 )
-                .select_from(text("information_schema.tables"))
+                .select_from(text(
+                    "information_schema.tables t \n"
+                    "LEFT JOIN pg_catalog.pg_class c ON c.relname = t.table_name \n"
+                    "LEFT JOIN pg_catalog.pg_namespace n ON n.nspname = t.table_schema AND c.relnamespace = n.oid \n"
+                    "LEFT JOIN pg_catalog.pg_description pd ON pd.objoid = c.oid AND pd.objsubid = 0"
+                ))
                 .where(
                     and_(
-                        text("table_catalog = (select current_database())"),
-                        text("is_insertable_into = 'YES'"),
-                        text("table_schema = 'public'"),
+                        text("t.table_catalog = (select current_database())"),
+                        text("t.is_insertable_into = 'YES'"),
+                        text("t.table_schema = 'public'"),
                     )
                 )
             )
@@ -348,12 +304,10 @@ class GenTableCRUD(CRUDBase[GenTableModel, GenTableSchema, GenTableSchema]):
                 )
                 gen_db_table_list = (await self.db.execute(query_sql)).fetchall()
             else:
-                # MySQL和PostgreSQL使用:table_names占位符
+                # MySQL和PostgreSQL使用IN拼接（注意已在上方限定schema范围）
                 query_sql = query_sql.where(
                     text(f"table_name IN ('{table_names_str}')")
                 )
-                # 使用params方法正确绑定参数
-                query_sql = query_sql.params(table_names=tuple(table_names))
                 gen_db_table_list = (await self.db.execute(query_sql)).fetchall()
         else:
             gen_db_table_list = (await self.db.execute(query_sql)).fetchall()
@@ -459,21 +413,29 @@ class GenTableColumnCRUD(CRUDBase[GenTableColumnModel, GenTableColumnSchema, Gen
 
         # 兼容SQLite和MySQL/PostgreSQL
         if settings.DATABASE_TYPE == "postgresql":
+            # 修复：PostgreSQL的主键/自增/注释需要关联系统表
             query_sql = """
                 SELECT
-                    column_name,
-                    (CASE WHEN (is_nullable = 'no' AND column_key != 'PRI') THEN '1' ELSE '0' END) AS is_required,
-                    (CASE WHEN column_key = 'PRI' THEN '1' ELSE '0' END) AS is_pk,
-                    ordinal_position AS sort,
-                    column_comment,
-                    (CASE WHEN extra = 'auto_increment' THEN '1' ELSE '0' END) AS is_increment,
-                    column_type
-                FROM 
-                    information_schema.columns
-                WHERE 
-                    table_catalog = (select current_database())
-                    AND table_schema = 'public'
-                    AND table_name = :table_name
+                    c.column_name,
+                    (CASE WHEN (c.is_nullable = 'NO' AND (tc.constraint_type IS DISTINCT FROM 'PRIMARY KEY')) THEN '1' ELSE '0' END) AS is_required,
+                    (CASE WHEN (tc.constraint_type = 'PRIMARY KEY') THEN '1' ELSE '0' END) AS is_pk,
+                    c.ordinal_position AS sort,
+                    COALESCE(pgd.description, '') AS column_comment,
+                    (CASE WHEN c.column_default LIKE 'nextval%' THEN '1' ELSE '0' END) AS is_increment,
+                    c.udt_name AS column_type
+                FROM information_schema.columns c
+                LEFT JOIN information_schema.key_column_usage kcu
+                  ON c.table_name = kcu.table_name AND c.column_name = kcu.column_name AND kcu.table_schema = c.table_schema
+                LEFT JOIN information_schema.table_constraints tc
+                  ON tc.constraint_name = kcu.constraint_name AND tc.table_name = c.table_name AND tc.table_schema = c.table_schema
+                LEFT JOIN pg_catalog.pg_statio_all_tables st
+                  ON st.relname = c.table_name
+                LEFT JOIN pg_catalog.pg_description pgd
+                  ON pgd.objoid = st.relid AND pgd.objsubid = c.ordinal_position
+                WHERE c.table_catalog = current_database()
+                  AND c.table_schema = 'public'
+                  AND c.table_name = :table_name
+                ORDER BY c.ordinal_position
             """
         elif settings.DATABASE_TYPE == "mysql":
             query_sql = """
@@ -507,9 +469,7 @@ class GenTableColumnCRUD(CRUDBase[GenTableColumnModel, GenTableColumnSchema, Gen
             """
         
         query = text(query_sql).bindparams(table_name=table_name)
-        rows = (
-            await self.db.execute(query)
-        ).fetchall()
+        rows = (await self.db.execute(query)).fetchall()
         result = [
             GenTableColumnOutSchema(
                 column_name=row[0],

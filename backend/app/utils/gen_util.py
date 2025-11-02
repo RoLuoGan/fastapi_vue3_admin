@@ -59,12 +59,13 @@ class GenUtils:
             column.python_field = column_name
         # 只有当python_type为None时才设置默认类型
         if column.python_type is None:
+            # 根据数据库类型映射到Python类型（统一使用大写键以兼容MySQL）
             column.python_type = GenConstant.DB_TO_PYTHON.get(data_type.upper(), "Any")
-        # 只有当query_type为None时才设置默认查询类型
+        # 查询类型：优先根据字段语义（如以name结尾走LIKE），否则默认EQ
         if column.query_type is None:
-            column.query_type = GenConstant.QUERY_EQ
+            column.query_type = GenConstant.QUERY_LIKE if column_name.lower().endswith("name") else GenConstant.QUERY_EQ
 
-        # 只有当html_type为None时才设置HTML类型
+        # HTML类型：根据数据库类型设置基础控件，再根据字段语义进行覆写
         if column.html_type is None:
             if cls.arrays_contains(GenConstant.COLUMNTYPE_STR, data_type) or cls.arrays_contains(
                 GenConstant.COLUMNTYPE_TEXT, data_type
@@ -83,6 +84,19 @@ class GenUtils:
                 column.html_type = GenConstant.HTML_INPUT
             else:
                 column.html_type = GenConstant.HTML_INPUT
+
+        # 基于字段命名语义的控件类型覆写（若已设为通用input/textarea则按语义更精确的控件替换）
+        # 这些覆写通常比类型映射更贴近业务含义
+        if column_name.lower().endswith("status"):
+            column.html_type = GenConstant.HTML_RADIO
+        elif column_name.lower().endswith("type") or column_name.lower().endswith("sex"):
+            column.html_type = GenConstant.HTML_SELECT
+        elif column_name.lower().endswith("image"):
+            column.html_type = GenConstant.HTML_IMAGE_UPLOAD
+        elif column_name.lower().endswith("file"):
+            column.html_type = GenConstant.HTML_FILE_UPLOAD
+        elif column_name.lower().endswith("content"):
+            column.html_type = GenConstant.HTML_EDITOR
 
         # 只有当is_insert为None时才设置插入字段（默认所有字段都需要插入）
         if column.is_insert is None:
@@ -126,7 +140,7 @@ class GenUtils:
     @classmethod
     def arrays_contains(cls, arr: List[str], target_value: str) -> bool:
         """
-        校验数组是否包含指定值
+        校验数组是否包含指定值（忽略大小写）
 
         参数:
         - arr (List[str]): 数组。
@@ -135,7 +149,9 @@ class GenUtils:
         返回:
         - bool: 校验结果。
         """
-        return target_value in arr
+        if target_value is None:
+            return False
+        return any(item.lower() == target_value.lower() for item in arr)
 
     @classmethod
     def get_module_name(cls, package_name: str) -> str:
@@ -245,14 +261,18 @@ class GenUtils:
         获取字段长度
 
         参数:
-        - column_type (str): 字段类型。
+        - column_type (str): 字段类型，例如 'varchar(255)' 或 'decimal(10,2)'
 
         返回:
-        - int: 字段长度。
+        - int: 字段长度（优先取第一个长度值，无法解析时返回0）。
         """
-        if '(' in column_type:
-            length = len(column_type.split('(')[1].split(')')[0])
-            return length
+        if '(' in column_type and ')' in column_type:
+            try:
+                inner = column_type.split('(')[1].split(')')[0]
+                first = inner.split(',')[0].strip()
+                return int(first)
+            except Exception:
+                return 0
         return 0
 
     @classmethod

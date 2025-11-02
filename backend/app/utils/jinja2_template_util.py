@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Set
 from app.common.constant import GenConstant
 from app.config.setting import settings
 from app.api.v1.module_generator.gencode.schema import GenTableOutSchema, GenTableColumnOutSchema
+from app.utils.common_util import CamelCaseUtil, SnakeCaseUtil
 from app.utils.string_util import StringUtil
 
 
@@ -44,8 +45,9 @@ class Jinja2TemplateInitializerUtil:
             )
             env.filters.update(
                 {
+                    'camel_to_snake': SnakeCaseUtil.camel_to_snake,
+                    'snake_to_camel': CamelCaseUtil.snake_to_camel,
                     'get_sqlalchemy_type': Jinja2TemplateUtil.get_sqlalchemy_type,
-                    'snake_to_pascal_case': StringUtil.convert_to_camel_case,
                 }
             )
             return env
@@ -207,20 +209,13 @@ class Jinja2TemplateUtil:
     def set_sub_context(cls, context: Dict, gen_table: GenTableOutSchema):
         """
         设置子表上下文。
-        
-        参数:
-        - context (Dict): 模板上下文字典。
-        - gen_table (GenTableOutSchema): 生成表的配置信息。
-        
-        返回:
-        - Dict: 更新后的模板上下文字典。
         """
         sub_table = gen_table.sub_table
         sub_table_name = gen_table.sub_table_name or ''
         sub_table_fk_name = gen_table.sub_table_fk_name or ''
-        # 处理sub_table为None的情况
-        sub_class_name = sub_table.class_name if sub_table else '' if sub_table else ''
-        sub_table_fk_class_name = StringUtil.convert_to_camel_case(sub_table_fk_name) if sub_table_fk_name else ''
+        # 修复：避免重复的条件判断，清晰处理None
+        sub_class_name = sub_table.class_name if sub_table else ''
+        sub_table_fk_class_name = CamelCaseUtil.snake_to_camel(sub_table_fk_name) if sub_table_fk_name else ''
         context['sub_table'] = sub_table
         context['sub_table_name'] = sub_table_name
         context['sub_table_fk_name'] = sub_table_fk_name
@@ -248,26 +243,21 @@ class Jinja2TemplateUtil:
         # 处理空值情况
         category = tpl_category or GenConstant.TPL_CRUD
         templates = [
-            # Python相关模板（调整为实际目录）
-            'backend/app/v1/module_demo/python/controller.py.j2',
-            'backend/app/v1/module_demo/python/service.py.j2',
-            'backend/app/v1/module_demo/python/crud.py.j2',
-            'backend/app/v1/module_demo/python/schema.py.j2',
-            'backend/app/v1/module_demo/python/param.py.j2',
-            'backend/app/v1/module_demo/python/model.py.j2',
-            'backend/app/v1/module_demo/python/__init__.py.j2',
-
-            # Vue相关模板（API）
-            'frontend/src/api/api.ts.j2',
-            # SQL脚本模板（调整为实际目录）
-            'backend/sql/sql.sql.j2',
+            'python/controller.py.j2',
+            'python/service.py.j2',
+            'python/crud.py.j2',
+            'python/schema.py.j2',
+            'python/param.py.j2',
+            'python/model.py.j2',
+            'sql/sql.sql.j2',
+            'ts/api.ts.j2',
         ]
         if category == GenConstant.TPL_CRUD:
-            templates.append(f'frontend/src/views/module_demo/{use_web_type}/index.vue.j2')
+            templates.append(f'{use_web_type}/index.vue.j2')
         elif category == GenConstant.TPL_TREE:
-            templates.append(f'frontend/src/views/module_demo/{use_web_type}/index-tree.vue.j2')
+            templates.append(f'{use_web_type}/index-tree.vue.j2')
         elif category == GenConstant.TPL_SUB:
-            templates.append(f'frontend/src/views/module_demo/{use_web_type}/index.vue.j2')
+            templates.append(f'{use_web_type}/index.vue.j2')
         return templates
     
     @classmethod
@@ -287,28 +277,29 @@ class Jinja2TemplateUtil:
         business_name = gen_table.business_name or ''
 
         vue_path = cls.FRONTEND_PROJECT_PATH
-        python_path = f'{cls.BACKEND_PROJECT_PATH}/{package_name.replace(".", "/")}' if package_name else cls.BACKEND_PROJECT_PATH
+        python_path = cls.BACKEND_PROJECT_PATH
 
         if 'controller.py.j2' in template:
-            return f'{python_path}/app/api/v1/{module_name}/{business_name}/controller.py'
+            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/controller.py'
         elif 'crud.py.j2' in template:
-            return f'{python_path}/app/api/v1/{module_name}/{business_name}/crud.py'
+            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/crud.py'
         elif 'model.py.j2' in template:
-            return f'{python_path}/app/api/v1/{module_name}/{business_name}/model.py'
+            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/model.py'
         elif 'service.py.j2' in template:
-            return f'{python_path}/app/api/v1/{module_name}/{business_name}/service.py'
+            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/service.py'
         elif 'param.py.j2' in template:
-            return f'{python_path}/app/api/v1/{module_name}/{business_name}/param.py'
+            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/param.py'
         elif 'schema.py.j2' in template:
-            return f'{python_path}/app/api/v1/{module_name}/{business_name}/schema.py'
-        elif '__init__.py.j2' in template:
-            return f'{vue_path}/src/views/{module_name}/{business_name}/__init__.py'
+            return f'{python_path}/app/api/v1/module_{module_name}/{business_name}/schema.py'
         elif 'sql.sql.j2' in template:
-            return f'{cls.BACKEND_PROJECT_PATH}/sql/{module_name}/{business_name}_menu.sql'
+            return f'{python_path}/sql/module_{module_name}/{business_name}_menu.sql'
         elif 'api.ts.j2' in template:
-            return f'{vue_path}/src/api/{module_name}/{business_name}.ts'
-        elif 'index.vue.j2' in template or 'index-tree.vue.j2' in template:
-            return f'{vue_path}/src/views/{module_name}/{business_name}/index.vue'
+            return f'{vue_path}/src/api/module_{module_name}/{business_name}.ts'
+        elif 'index.vue.j2' in template:
+            return f'{vue_path}/src/views/module_{module_name}/{business_name}/index.vue'
+        elif 'index-tree.vue.j2' in template:
+            # 修复：树形模板生成到专用文件名
+            return f'{vue_path}/src/views/module_{module_name}/{business_name}/index-tree.vue'
         return ''
 
     @classmethod
@@ -322,7 +313,8 @@ class Jinja2TemplateUtil:
         返回:
         - str: 包前缀。
         """
-        return package_name[: package_name.rfind('.')]
+        # 修复：当包名中不存在'.'时，直接返回原包名
+        return package_name[: package_name.rfind('.')] if '.' in package_name else package_name
 
     @classmethod
     def get_vo_import_list(cls, gen_table: GenTableOutSchema):
