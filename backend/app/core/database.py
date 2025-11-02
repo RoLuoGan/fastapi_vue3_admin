@@ -102,7 +102,7 @@ async def redis_connect(app: FastAPI, status: bool) -> Redis | None:
             raise exceptions.RedisError(f"Redis连接错误: {e}")
     else:
         await app.state.redis.close()
-        logger.info('Redis连接已关闭')
+        logger.info('✅️ Redis连接已关闭')
 
 async def mongodb_connect(app: FastAPI, status: bool) -> AsyncIOMotorClient | None:
     """
@@ -130,10 +130,10 @@ async def mongodb_connect(app: FastAPI, status: bool) -> AsyncIOMotorClient | No
             app.state.mongo_client = client
             app.state.mongo = client[settings.MONGO_DB_NAME]
             data = await client.server_info()
-            logger.info("MongoDB连接成功...", data)
+            logger.info("✅️ MongoDB连接成功...", data)
             return client
         except Exception as e:
             raise ValueError(f"MongoDB连接失败: {e}")
     else:
         app.state.mongo_client.close()
-        logger.info("❌️ MongoDB连接已关闭")
+        logger.info("✅️ MongoDB连接已关闭")

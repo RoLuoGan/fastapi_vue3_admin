@@ -3,7 +3,7 @@
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, ClassVar, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from uvicorn.config import LifespanType
 from urllib.parse import quote_plus
@@ -20,18 +20,8 @@ class Settings(BaseSettings):
         case_sensitive=True, # 区分大小写
     )
 
-    ENVIRONMENT: EnvironmentEnum
+    ENVIRONMENT: EnvironmentEnum = EnvironmentEnum.DEV
     
-    BANNER: ClassVar[str] = f"""
-     ______        _                  _ 
-    |  ____|      | |     /\         (_)
-    | |__ __ _ ___| |_   /  \   _ __  _ 
-    |  __/ _` / __| __| / /\ \ | '_ \| |
-    | | | (_| \__ \ |_ / ____ \| |_) | |
-    |_|  \__,_|___/\__/_/    \_\ .__/|_|
-                               | |      
-                               |_|
-    """
     # ================================================= #
     # ******************* 项目配置 ****************** #
     # ================================================= #
@@ -41,28 +31,28 @@ class Settings(BaseSettings):
     # ================================================= #
     # ******************* 服务器配置 ****************** #
     # ================================================= #
-    SERVER_HOST: str         # 允许访问的IP地址
-    SERVER_PORT: int         # 服务端口
-    RELOAD: bool             # 是否自动重启
-    FACTORY: bool            # 是否使用异步模式
-    LIFESPAN: LifespanType   # 生命周期模式
-    WORKERS: int             # 启动进程数
-    LIMIT_CONCURRENCY: int   # 最大并发连接数
-    BACKLOG: int             # 等待队列最大连接数
-    LIMIT_MAX_REQUESTS: int  # HTTP最大请求数
-    TIMEOUT_KEEP_ALIVE: int  # 保持连接时间(秒)
+    SERVER_HOST: str = '0.0.0.0'        # 允许访问的IP地址
+    SERVER_PORT: int = 8001             # 服务端口
+    RELOAD: bool = True                 # 是否自动重启
+    FACTORY: bool = True                # 是否使用异步模式
+    LIFESPAN: LifespanType = 'on'       # 生命周期模式
+    WORKERS: int = 1                    # 启动进程数
+    LIMIT_CONCURRENCY: int = 1000       # 最大并发连接数
+    BACKLOG: int = 2048                 # 等待队列最大连接数
+    LIMIT_MAX_REQUESTS: int = 4094      # HTTP最大请求数
+    TIMEOUT_KEEP_ALIVE: int = 5         # 保持连接时间(秒)
 
     # ================================================= #
     # ******************* API文档配置 ****************** #
     # ================================================= #
-    DEBUG: bool             # 调试模式
-    TITLE: str              # 文档标题
-    VERSION: str            # 版本号
-    DESCRIPTION: str        # 文档描述
-    SUMMARY: str            # 文档概述
-    DOCS_URL: str           # Swagger UI路径
-    REDOC_URL: str          # ReDoc路径
-    ROOT_PATH: str          # API路由前缀
+    DEBUG: bool = True            # 调试模式
+    TITLE: str = "🎉 FastapiAdmin 🎉 -dev"  # 文档标题
+    VERSION: str = '0.1.0'        # 版本号
+    DESCRIPTION: str = "该项目是一个基于python的web服务框架，基于fastapi和sqlalchemy实现。"  # 文档描述
+    SUMMARY: str = "接口汇总"      # 文档概述
+    DOCS_URL: str = "/docs"      # Swagger UI路径
+    REDOC_URL: str = "/redoc"    # ReDoc路径
+    ROOT_PATH: str = "/api/v1"   # API路由前缀
 
     # ================================================= #
     # ******************** 跨域配置 ******************** #
@@ -103,35 +93,35 @@ class Settings(BaseSettings):
     EXPIRE_ON_COMMIT: bool = False                         # 是否在提交时过期
 
     # 数据库类型
-    DATABASE_TYPE: Literal['sqlite','mysql', 'postgresql']
+    DATABASE_TYPE: Literal['sqlite','mysql', 'postgresql'] = 'sqlite'
     
 
     # MySQL/PostgreSQL/SQLite数据库连接
-    DATABASE_HOST: str
-    DATABASE_PORT: int
-    DATABASE_USER: str
-    DATABASE_PASSWORD: str
-    DATABASE_NAME: str
+    DATABASE_HOST: str = 'localhost'
+    DATABASE_PORT: int = 3306
+    DATABASE_USER: str = 'root'
+    DATABASE_PASSWORD: str = 'ServBay.dev'
+    DATABASE_NAME: str = 'fastapiadmin'
 
     # ================================================= #
     # ******************** MongoDB配置 ******************* #
     # ================================================= #
-    MONGO_DB_ENABLE: bool # 是否启用MongoDB
-    MONGO_DB_USER: str
-    MONGO_DB_PASSWORD: str
-    MONGO_DB_HOST: str
-    MONGO_DB_PORT: int
-    MONGO_DB_NAME: str
+    MONGO_DB_ENABLE: bool = False # 是否启用MongoDB
+    MONGO_DB_USER: str = ''
+    MONGO_DB_PASSWORD: str = ''
+    MONGO_DB_HOST: str = 'localhost'
+    MONGO_DB_PORT: int = 27017
+    MONGO_DB_NAME: str = 'admin'
 
     # ================================================= #
     # ******************** Redis配置 ******************* #
     # ================================================= #
-    REDIS_ENABLE: bool  # 是否启用Redis
-    REDIS_HOST: str
-    REDIS_PORT: int
-    REDIS_DB_NAME: int
-    REDIS_USER: str
-    REDIS_PASSWORD: str
+    REDIS_ENABLE: bool = True  # 是否启用Redis
+    REDIS_HOST: str = 'localhost'
+    REDIS_PORT: int = 6379
+    REDIS_DB_NAME: int = 1
+    REDIS_USER: str = ''
+    REDIS_PASSWORD: str = ''
 
     # ================================================= #
     # ******************** 验证码配置 ******************* #
@@ -175,14 +165,14 @@ class Settings(BaseSettings):
     # ***************** 模版文件配置 ***************** #
     # ================================================= #
     TEMPLATE: str = "templates"
-    TEMPLATE_DIR: Path = BASE_DIR.joinpath(TEMPLATE) # 模版目录
+    TEMPLATE_DIR: Path = BASE_DIR.joinpath(TEMPLATE)
 
     # ================================================= #
     # ***************** 动态文件配置 ***************** #
     # ================================================= #
     UPLOAD_FILE_PATH: Path = Path('static/upload')    # 上传目录
-    UPLOAD_MACHINE: str = 'A'                                      # 上传机器标识
-    ALLOWED_EXTENSIONS: list[str] = [                              # 允许的文件类型
+    UPLOAD_MACHINE: str = 'A'                         # 上传机器标识
+    ALLOWED_EXTENSIONS: list[str] = [                 # 允许的文件类型
         # 图片
         '.bmp', '.gif', '.jpg', '.jpeg', '.png', '.ico', '.svg',
         # 文档
@@ -205,30 +195,25 @@ class Settings(BaseSettings):
     # ================================================= #
     # ******************* 初始化数据 ****************** #
     # ================================================= #
-    SCRIPT_DIR: Path = BASE_DIR.joinpath('app/scripts/data')  # 管理员路由目录
+    SCRIPT_DIR: Path = BASE_DIR.joinpath('app/scripts/data')
 
     # ================================================= #
     # ******************* 代码生成配置 ****************** #
     # ================================================= #
-    author: str = 'FastapiAdmin'                    # 作者
-    package_name: str = 'module_generator.gencode'  # 默认生成包路径 system 需改成自己的模块名称 如 system monitor tool
+    package_name: str = 'module_gencode'            # 默认生成包路径 system 需改成自己的模块名称 如 system monitor tool
     auto_remove_pre: bool = False                   # 自动去除表前缀，默认是True
     table_prefix: str = 'gen_'                      # 表前缀（生成类名不会包含表前缀，多个用逗号分隔）
-    allow_overwrite: bool = False                   # 是否允许生成文件覆盖到本地（自定义路径），默认不允许
-
-    GEN_PATH: Path = BASE_DIR.joinpath('app/api/v1/module_generator/gen_backend_code')
-
+    allow_overwrite: bool = True                    # 是否允许生成文件覆盖到本地（自定义路径），默认不允许
 
     # ================================================= #
     # ******************* AI大模型配置 ****************** #
     # ================================================= #
-    # https://bailian.console.aliyun.com/?spm=5176.29619931.J_AHgvE-XDhTWrtotIBlDQQ.13.74cd521clrmQ7o&tab=api#/api/?type=model&url=https%3A%2F%2Fhelp.aliyun.com%2Fdocument_detail%2F2712576.html&renderType=iframe
-    OPENAI_BASE_URL: str
-    OPENAI_API_KEY: str
-    OPENAI_MODEL: str
+    OPENAI_BASE_URL: str = ''
+    OPENAI_API_KEY: str = ''
+    OPENAI_MODEL: str = ''
 
     # ================================================= #
-    # ******************* 其他配置 ******************* #
+    # ******************* 重构配置 ******************* #
     # ================================================= #
     @property
     def MIDDLEWARE_LIST(self) -> List[Optional[str]]:
@@ -277,12 +262,12 @@ class Settings(BaseSettings):
     @property
     def MONGO_DB_URI(self) -> str:
         """获取MongoDB连接"""
-        return f"mongodb://{settings.MONGO_DB_USER}:{settings.MONGO_DB_PASSWORD}@{settings.MONGO_DB_HOST}:{settings.MONGO_DB_PORT}/{settings.MONGO_DB_NAME}"
+        return f"mongodb://{self.MONGO_DB_USER}:{self.MONGO_DB_PASSWORD}@{self.MONGO_DB_HOST}:{self.MONGO_DB_PORT}/{self.MONGO_DB_NAME}"
     
     @property
     def REDIS_URI(self) -> str:
         """获取Redis连接"""
-        return f"redis://{settings.REDIS_USER}:{self.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB_NAME}"
+        return f"redis://{self.REDIS_USER}:{self.REDIS_PASSWORD}@{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB_NAME}"
     
     @property
     def FASTAPI_CONFIG(self) -> dict[str, Any]:
@@ -332,9 +317,10 @@ class Settings(BaseSettings):
                     },
                     "file": {
                         "formatter": "default",
-                        "class": "app.core.logger.CustomTimedRotatingFileHandler",
-                        "filename": self.LOGGER_DIR.joinpath("all.log"),
+                        "class": "logging.handlers.TimedRotatingFileHandler",
+                        "filename": str(self.LOGGER_DIR.joinpath("info.log")),
                         "when": self.WHEN,
+                        "interval": self.INTERVAL,
                         "backupCount": self.BACKUPCOUNT,
                         "encoding": self.ENCODING,
                     },
@@ -362,7 +348,6 @@ def get_settings() -> Settings:
         raise ValueError(f"无效的环境配置: {env}")
     
     env_file = Path(__file__).parent.parent.parent / "env" / f".env.{env}"
-
     if not env_file.exists():
         raise FileNotFoundError(f"环境配置文件不存在: {env_file}")
 

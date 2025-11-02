@@ -6,15 +6,32 @@
         <el-form-item label="表名称" prop="table_name">
           <el-input v-model="queryFormData.table_name" placeholder="请输入表名称" clearable style="width: 200px" @keyup.enter="handleQuery"/>
         </el-form-item>
-        <el-form-item label="表描述" prop="tableComment">
+        <el-form-item label="表描述" prop="table_comment">
           <el-input v-model="queryFormData.table_comment" placeholder="请输入表描述" clearable style="width: 200px" @keyup.enter="handleQuery"/>
         </el-form-item>
-        <el-form-item label="创建时间" style="width: 308px">
-          <el-date-picker v-model="dateRange" value-format="YYYY-MM-DD" type="daterange" range-separator="-" start-placeholder="开始日期" end-placeholder="结束日期"/>
+        <el-form-item v-if="isExpand" prop="start_time" label="创建时间">
+          <DatePicker
+            v-model="dateRange"
+            @update:model-value="handleDateRangeChange"
+          />
         </el-form-item>
         <el-form-item class="search-buttons">
           <el-button v-hasPerm="['generator:gencode:query']" type="primary" icon="search" native-type="submit">查询</el-button>
           <el-button v-hasPerm="['generator:gencode:query']" icon="refresh" @click="handleRefresh">重置</el-button>
+          <!-- 展开/收起 -->
+          <template v-if="isExpandable">
+            <el-link class="ml-3" type="primary" underline="never" @click="isExpand = !isExpand">
+              {{ isExpand ? "收起" : "展开" }}
+              <el-icon>
+                <template v-if="isExpand">
+                  <ArrowUp />
+                </template>
+                <template v-else>
+                  <ArrowDown />
+                </template>
+              </el-icon>
+            </el-link>
+          </template>
         </el-form-item>
       </el-form>
     </div>
@@ -46,7 +63,7 @@
               <el-button v-hasPerm="['generator:gencode:delete']" type="danger" plain icon="Delete" :disabled="ids.length === 0" @click="handleDelete()">批量删除</el-button>
             </el-col>
             <el-col :span="1.5">
-              <el-button v-hasPerm="['generator:gencode:code']" type="warning" plain icon="Download" :disabled="!canGenerate" @click="handleGenTableClick">批量生成</el-button>
+              <el-button v-hasPerm="['generator:gencode:code']" type="warning" plain icon="Download" :disabled="!canGenerate" @click="handleGenTable()">批量生成</el-button>
             </el-col>
           </el-row>
         </div>
@@ -88,7 +105,7 @@
           <el-empty :image-size="80" description="暂无数据" />
         </template>
         <el-table-column v-if="tableColumns.find(col => col.prop === 'selection')?.show" type="selection" align="center" width="55"></el-table-column>
-        <el-table-column v-if="tableColumns.find(col => col.prop === 'index')?.show" label="序号" type="index" min-width="60" align="center" fixed>
+        <el-table-column v-if="tableColumns.find(col => col.prop === 'index')?.show" label="序号" type="index" min-width="30" align="center" fixed>
           <template #default="scope">
             <span>{{(queryFormData.page_no - 1) * queryFormData.page_size + scope.$index + 1}}</span>
           </template>
@@ -98,17 +115,11 @@
         <el-table-column v-if="tableColumns.find(col => col.prop === 'class_name')?.show" label="实体" prop="class_name" :show-overflow-tooltip="true"/>
         <el-table-column v-if="tableColumns.find(col => col.prop === 'created_at')?.show" label="创建时间" prop="created_at" />
         <el-table-column v-if="tableColumns.find(col => col.prop === 'updated_at')?.show" label="更新时间" prop="updated_at" />
-        <el-table-column v-if="tableColumns.find(col => col.prop === 'operation')?.show" label="操作" align="center"  class-name="small-padding fixed-width">
+        <el-table-column v-if="tableColumns.find(col => col.prop === 'operation')?.show" label="操作" align="center" min-width="120" class-name="small-padding fixed-width">
           <template #default="scope">
-            <el-tooltip content="代码生成" placement="top">
-              <el-button v-hasPerm="['generator:gencode:update']" link type="primary" :icon="MagicStick" @click="handleEditTable(scope.row)"></el-button>
-            </el-tooltip>
-            <el-tooltip content="删除" placement="top">
-              <el-button v-hasPerm="['generator:gencode:delete']" link type="danger" icon="Delete" @click="handleDelete(scope.row)"></el-button>
-            </el-tooltip>
-            <el-tooltip content="同步" placement="top">
-              <el-button v-hasPerm="['generator:gencode:sync']" link type="success" icon="Refresh" @click="handleSynchDb(scope.row)"></el-button>
-            </el-tooltip>
+            <el-button v-hasPerm="['generator:gencode:update']" link type="primary" :icon="MagicStick" @click="handlePreviewTable(scope.row)">代码生成</el-button>
+            <el-button v-hasPerm="['generator:gencode:delete']" link type="danger" icon="Delete" @click="handleDelete(scope.row)">删除</el-button>
+            <el-button v-hasPerm="['generator:gencode:sync']" link type="success" icon="Refresh" @click="handleSynchDb(scope.row)">同步</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -195,7 +206,7 @@
 
     <!-- 代码生成抽屉 -->
     <el-drawer v-model="editVisible" :title="'【代码生成】' + info.table_name" size="80%" @close="handleClose">
-      <el-steps :active="activeStep" align-center finish-status="success" simple>
+      <el-steps :active="activeStep" finish-status="success" simple>
         <el-step title="基础配置" />
         <el-step title="字段配置" />
         <el-step title="预览代码" />
@@ -212,18 +223,13 @@
               </el-form-item>
             </el-col>
             <el-col :span="12">
-              <el-form-item label="表描述" prop="tableComment">
+              <el-form-item label="表描述" prop="table_comment">
                 <el-input v-model="info.table_comment" placeholder="请输入表描述"/>
               </el-form-item>
             </el-col>
             <el-col :span="12">
-              <el-form-item label="实体类名称" prop="className">
+              <el-form-item label="实体类名称" prop="class_name">
                 <el-input v-model="info.class_name" placeholder="请输入"/>
-              </el-form-item>
-            </el-col>
-            <el-col :span="12">
-              <el-form-item label="作者" prop="functionAuthor">
-                <el-input v-model="info.function_author" placeholder="请输入"/>
               </el-form-item>
             </el-col>
             <el-col :span="24">
@@ -243,8 +249,8 @@
                 <el-button size="small" type="primary" plain>查询</el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item @click="bulkSet('is_query', 1)">全选</el-dropdown-item>
-                    <el-dropdown-item @click="bulkSet('is_query', 0)">全不选</el-dropdown-item>
+                    <el-dropdown-item @click="bulkSet('is_query', '1')">全选</el-dropdown-item>
+                    <el-dropdown-item @click="bulkSet('is_query', '0')">全不选</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -252,17 +258,26 @@
                 <el-button size="small" type="success" plain>列表</el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item @click="bulkSet('is_list', 1)">全选</el-dropdown-item>
-                    <el-dropdown-item @click="bulkSet('is_list', 0)">全不选</el-dropdown-item>
+                    <el-dropdown-item @click="bulkSet('is_list', '1')">全选</el-dropdown-item>
+                    <el-dropdown-item @click="bulkSet('is_list', '0')">全不选</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
               <el-dropdown>
-                <el-button size="small" type="warning" plain>表单</el-button>
+                <el-button size="small" type="warning" plain>新增</el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
-                    <el-dropdown-item @click="bulkSet(['is_insert', 'is_edit'], 1)">全选</el-dropdown-item>
-                    <el-dropdown-item @click="bulkSet(['is_insert', 'is_edit'], 0)">全不选</el-dropdown-item>
+                    <el-dropdown-item @click="bulkSet('is_insert', '1')">全选</el-dropdown-item>
+                    <el-dropdown-item @click="bulkSet('is_insert', '0')">全不选</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+              <el-dropdown>
+                <el-button size="small" type="danger" plain>编辑</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="bulkSet('is_edit', '1')">全选</el-dropdown-item>
+                    <el-dropdown-item @click="bulkSet('is_edit', '0')">全不选</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -270,22 +285,24 @@
           </div>
           <el-table 
             ref="dragTable" 
+            v-loading="loading"
             :data="columns" 
             row-key="id" 
             :max-height="tableHeight" 
+            highlight--currentrow
             class="data-table__content" 
             border 
             stripe
           >
             <el-table-column label="序号" type="index" min-width="5%"/>
             <el-table-column label="字段列名" prop="column_name" min-width="10%" :show-overflow-tooltip="true"/>
-            <el-table-column label="字段描述" min-width="10%">
+            <el-table-column label="字段注释" min-width="10%">
               <template #default="scope">
                 <el-input v-model="scope.row.column_comment"></el-input>
               </template>
             </el-table-column>
             <el-table-column label="列类型" prop="column_type" min-width="10%" :show-overflow-tooltip="true"/>
-            <el-table-column label="字段类型" min-width="11%">
+            <el-table-column label="python类型" min-width="11%">
               <template #default="scope">
                 <el-select v-model="scope.row.python_type">
                   <el-option label="str" value="str" />
@@ -301,29 +318,29 @@
                 </el-select>
               </template>
             </el-table-column>
-            <el-table-column label="字段属性" min-width="10%">
+            <el-table-column label="python属性" min-width="10%">
               <template #default="scope">
                 <el-input v-model="scope.row.python_field"></el-input>
               </template>
             </el-table-column>
-            <el-table-column label="插入" min-width="5%">
+            <el-table-column label="新增" min-width="5%">
               <template #default="scope">
-                <el-checkbox v-model="scope.row.is_insert" true-label="1" false-label="0"></el-checkbox>
+                <el-checkbox v-model="scope.row.is_insert" true-value="1" false-value="0"></el-checkbox>
               </template>
             </el-table-column>
             <el-table-column label="编辑" min-width="5%">
               <template #default="scope">
-                <el-checkbox v-model="scope.row.is_edit" true-label="1" false-label="0"></el-checkbox>
+                <el-checkbox v-model="scope.row.is_edit" true-value="1" false-value="0"></el-checkbox>
               </template>
             </el-table-column>
             <el-table-column label="列表" min-width="5%">
               <template #default="scope">
-                <el-checkbox v-model="scope.row.is_list" true-label="1" false-label="0"></el-checkbox>
+                <el-checkbox v-model="scope.row.is_list" true-value="1" false-value="0"></el-checkbox>
               </template>
             </el-table-column>
             <el-table-column label="查询" min-width="5%">
               <template #default="scope">
-                <el-checkbox v-model="scope.row.is_query" true-label="1" false-label="0"></el-checkbox>
+                <el-checkbox v-model="scope.row.is_query" true-value="1" false-value="0"></el-checkbox>
               </template>
             </el-table-column>
             <el-table-column label="查询方式" min-width="10%">
@@ -342,12 +359,12 @@
             </el-table-column>
             <el-table-column label="必填" min-width="5%">
               <template #default="scope">
-                <el-checkbox v-model="scope.row.is_required" true-label="1" false-label="0"></el-checkbox>
+                <el-checkbox v-model="scope.row.is_required" true-value="1" false-value="0"></el-checkbox>
               </template>
             </el-table-column>
             <el-table-column label="唯一" min-width="5%">
               <template #default="scope">
-                <el-checkbox v-model="scope.row.is_unique" true-label="1" false-label="0"></el-checkbox>
+                <el-checkbox v-model="scope.row.is_unique" true-value="1" false-value="0"></el-checkbox>
               </template>
             </el-table-column>
             <el-table-column label="表单类型" min-width="12%">
@@ -372,7 +389,7 @@
                     v-for="dict in dictOptions"
                     :key="dict.dict_type"
                     :label="dict.dict_name"
-                    :value="dict.dict_type">
+                    :value="dict.dict_type || ''">
                     <span style="float: left">{{ dict.dict_name }}</span>
                     <span style="float: right; color: #8492a6; font-size: 13px">{{ dict.dict_type }}</span>
                 </el-option>
@@ -382,20 +399,20 @@
           </el-table>
         </div>
 
-        <!-- 第三步：预览 -->
+        <!-- 第三步：预览代码 -->
         <el-row v-show="activeStep == 2">
           <el-col :span="24" class="mb-2">
             <div class="flex-y-center gap-3">
               <span class="text-sm color-#909399">预览范围</span>
               <el-radio-group v-model="previewScope" size="small">
-                <el-radio-button label="all">全部</el-radio-button>
-                <el-radio-button label="frontend">前端</el-radio-button>
-                <el-radio-button label="backend">后端</el-radio-button>
-                <el-radio-button label="sql">数据库</el-radio-button>
+                <el-radio-button value="all">全部</el-radio-button>
+                <el-radio-button value="frontend">前端</el-radio-button>
+                <el-radio-button value="backend">后端</el-radio-button>
+                <el-radio-button value="sql">数据库</el-radio-button>
               </el-radio-group>
               <span class="ml-3 text-sm color-#909399">类型</span>
               <el-checkbox-group v-model="previewTypes" size="small">
-                <el-checkbox-button v-for="t in previewTypeOptions" :key="t" :label="t">
+                <el-checkbox-button v-for="t in previewTypeOptions" :key="t" :value="t">
                   {{ t }}
                 </el-checkbox-button>
               </el-checkbox-group>
@@ -442,33 +459,12 @@
 
         <!-- 第四步：代码生成 -->
         <el-form v-show="activeStep == 3" ref="genInfo" :model="info" :rules="rules" label-width="150px">
-            <el-row>
-              <el-col :span="12">
-                <el-form-item prop="tpl_category">
-                  <template #label>生成模板</template>
-                  <el-select v-model="info.tpl_category" @change="tplSelectChange">
-                    <el-option label="单表（增删改查）" value="crud" />
-                    <el-option label="树表（增删改查）" value="tree" />
-                    <el-option label="主子表（增删改查）" value="sub" />
-                  </el-select>
-                </el-form-item>
-              </el-col>
-
-              <el-col :span="12">
-                <el-form-item prop="tpl_web_type">
-                  <template #label>前端类型</template>
-                  <el-select v-model="info.tpl_web_type">
-                    <el-option label="Vue2 Element UI 模版" value="element-ui" />
-                    <el-option label="Vue3 Element Plus 模版" value="element-plus" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-
+          <el-row>
             <el-col :span="12">
               <el-form-item prop="package_name">
                 <template #label>
                   生成包路径
-                  <el-tooltip content="生成在哪个java包下，例如 com.ruoyi.system" placement="top">
+                  <el-tooltip content="生成在哪个python模块下，例如 module_gencode" placement="top">
                     <el-icon><QuestionFilled/></el-icon>
                   </el-tooltip>
                 </template>
@@ -521,7 +517,7 @@
                   </el-tooltip>
                 </template>
                 <el-radio v-model="info.gen_type" value="0">zip压缩包</el-radio>
-                <el-radio v-model="info.gen_type" value="1">自定义路径</el-radio>
+                <el-radio v-model="info.gen_type" value="1">项目目录</el-radio>
               </el-form-item>
             </el-col>
 
@@ -536,117 +532,44 @@
                 <el-tree-select
                   v-model="info.parent_menu_id"
                   :data="menuOptions"
-                  :props="{ value: 'menu_id', label: 'menu_name', children: 'children' }"
-                  value-key="menu_id"
                   placeholder="请选择系统菜单"
                   check-strictly
+                  filterable
+                  :render-after-expand="false"
                 />
-              </el-form-item>
-            </el-col>
-
-            <el-col v-if="info.gen_type == '1'" :span="24">
-              <el-form-item prop="gen_path">
-                <template #label>
-                  自定义路径
-                  <el-tooltip content="填写磁盘绝对路径，若不填写，则生成到当前Web项目下" placement="top">
-                    <el-icon><QuestionFilled/></el-icon>
-                  </el-tooltip>
-                </template>
-                <el-input v-model="info.gen_path">
-                  <template #append>
-                    <el-dropdown>
-                      <el-button type="primary">
-                        最近路径快速选择
-                        <i class="el-icon-arrow-down el-icon--right"></i>
-                      </el-button>
-                      <template #dropdown>
-                        <el-dropdown-menu>
-                          <el-dropdown-item @click="handleResetGenPath">恢复默认的生成基础路径</el-dropdown-item>
-                        </el-dropdown-menu>
-                      </template>
-                    </el-dropdown>
-                  </template>
-                </el-input>
-              </el-form-item>
+              </el-form-item> 
             </el-col>
           </el-row>
-          
-          <template v-if="info.tpl_category == 'tree'">
-            <h4 class="form-header">其他信息</h4>
-            <el-row v-show="info.tpl_category == 'tree'">
-              <el-col :span="12">
-                <el-form-item>
-                  <template #label>
-                    树编码字段
-                    <el-tooltip content="树显示的编码字段名， 如：dept_id" placement="top">
-                      <el-icon><QuestionFilled/></el-icon>
-                    </el-tooltip>
-                  </template>
-                  <el-select v-model="info.tree_code" placeholder="请选择">
-                    <el-option
-                      v-for="(column, index) in info.columns || []"
-                      :key="index"
-                      :label="column.column_name + '：' + column.column_comment"
-                      :value="column.column_name"
-                    ></el-option>
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item>
-                  <template #label>
-                    树父编码字段
-                    <el-tooltip content="树显示的父编码字段名， 如：parent_Id" placement="top">
-                      <el-icon><QuestionFilled/></el-icon>
-                    </el-tooltip>
-                  </template>
-                  <el-select v-model="info.tree_parent_code" placeholder="请选择">
-                    <el-option
-                      v-for="(column, index) in info.columns || []"
-                      :key="index"
-                      :label="column.column_name + '：' + column.column_comment"
-                      :value="column.column_name"
-                    ></el-option>
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :span="12">
-                <el-form-item>
-                  <template #label>
-                    树名称字段
-                    <el-tooltip content="树节点的显示名称字段名， 如：dept_name" placement="top">
-                      <el-icon><QuestionFilled /></el-icon>
-                    </el-tooltip>
-                  </template>
-                  <el-select v-model="info.tree_name" placeholder="请选择">
-                    <el-option
-                      v-for="(column, index) in info.columns || []"
-                      :key="index"
-                      :label="column.column_name + '：' + column.column_comment"
-                      :value="column.column_name"
-                    ></el-option>
-                  </el-select>
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </template>
+
         </el-form>
       </div>
 
       <template #footer>
+        <!-- 公共按钮：关闭 -->
         <el-button :icon="Close" @click="close">关闭</el-button>
-        <el-button v-if="activeStep !== 0" type="success" :icon="Back"  @click="prevStep">上一步</el-button>
-        <el-button v-if="activeStep === 2" type="warning" :icon="Download" @click="handleGenTable(info)">下载代码</el-button>
-        <el-button v-if="activeStep === 3" type="primary" :icon="FolderOpened" :loading="loading"  @click="generateCode()">写入本地</el-button>
-        <el-button v-if="activeStep !== 3" type="primary" @click="nextStep">
-          <el-icon v-if="activeStep !== 1">
-            <Right />
-          </el-icon>
-          <el-icon v-if="activeStep === 1">
-            <View />
-          </el-icon>
-          下一步
+
+        <!-- 第一步：只有“下一步” -->
+        <el-button v-if="activeStep === 0" type="primary" @click="nextStep">
+          下一步，字段配置<el-icon class="el-icon--right"><Right /></el-icon>
         </el-button>
+
+        <!-- 第二步：有“上一步”和“下一步” -->
+        <el-button v-if="activeStep === 1" type="success" :icon="Back" @click="prevStep">上一步，基础配置</el-button>
+        <el-button v-if="activeStep === 1" type="warning" :icon="Edit" @click="submitForm">保存字段配置</el-button>
+        <el-button v-if="activeStep === 1" type="primary" @click="nextStep">
+          下一步，预览代码<el-icon class="el-icon--right"><View /></el-icon>
+        </el-button>
+
+        <!-- 第三步：有“上一步”和“下载代码” -->
+        <el-button v-if="activeStep === 2" type="success" :icon="Back" @click="prevStep">上一步，字段配置</el-button>
+        <el-button v-if="activeStep === 2" type="primary" @click="nextStep">
+          下一步，生成代码<el-icon class="el-icon--right"><Right /></el-icon>
+        </el-button>
+
+        <!-- 第四步：有“上一步”和“写入本地” -->
+        <el-button v-if="activeStep === 3" type="success" :icon="View" @click="prevStep">上一步，预览代码</el-button>
+        <el-button v-if="activeStep === 3" :disabled="info.gen_type != '0'" type="warning" :icon="Download" :loading="loading" @click="handleGenTable(info)">下载代码</el-button>
+        <el-button v-if="activeStep === 3" :disabled="info.gen_type != '1'" type="primary" :icon="FolderOpened" :loading="loading" @click="handleGenTable(info)">写入本地</el-button>
       </template>
     </el-drawer>
   </div>
@@ -654,21 +577,25 @@
 
 <script setup lang="ts">
 defineOptions({
-    name: "GenCode",
-    inheritAttrs: false,
+  name: "GenCode",
+  inheritAttrs: false,
 });
 
 import "codemirror/mode/javascript/javascript.js";
 import { ref, reactive, computed, onActivated, onMounted } from 'vue';
 import { useClipboard } from '@vueuse/core';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import Codemirror from "codemirror-editor-vue3";
 import type { EditorConfiguration } from "codemirror";
 import type { CmComponentRef } from "codemirror-editor-vue3";
 import { ElMessage, ElMessageBox, type FormInstance, type TableInstance } from 'element-plus';
-import { QuestionFilled, MagicStick, View, CopyDocument, Close, Right, FolderOpened, Back, Download } from '@element-plus/icons-vue';
+import { QuestionFilled, MagicStick, View, CopyDocument, Close, Right, FolderOpened, Back, Download, Edit } from '@element-plus/icons-vue';
 import GencodeAPI, { type GenTableOutVO, type DatabaseTable, type GenTableQueryParam, type GenTableColumnOutSchema, type GenTableSchema } from "@/api/generator/gencode";
-
+import { formatToDateTime } from "@/utils/dateUtil";
+import MenuAPI, { MenuTable } from "@/api/system/menu";
+import DictAPI, { DictTable } from "@/api/system/dict";
+import { formatTree } from "@/utils/common";
+import { MenuTypeEnum } from "@/enums";
 
 // 表格列配置接口
 interface TableColumn {
@@ -689,20 +616,8 @@ interface TreeNode {
 // 文件数据接口
 interface FileData {
   path: string;
-  fileName: string;
+  file_name: string;
   content: string;
-}
-
-// 字典选项接口
-interface DictOption {
-  dict_type: string;
-  dict_name: string;
-}
-
-// 菜单选项接口
-interface MenuOption {
-  id: number;
-  menu_name: string;
 }
 
 // 组件引用
@@ -719,7 +634,9 @@ const total = ref<number>(0);
 const uniqueId = ref("");
 const editVisible = ref(false);
 const tableHeight = ref<number>(0);
-const activeStep = ref(0);
+const activeStep = ref(2);
+const isExpandable = ref(true);
+const isExpand = ref(false);
 
 // UI状态
 const createTableVisible = ref(false);
@@ -727,7 +644,7 @@ const importVisible = ref(false);
 
 // 表单和列表数据
 const createContent = ref("");
-const dateRange = ref<string[]>([]);
+const dateRange = ref<[Date, Date] | []>([]);
 const tableList = ref<GenTableOutVO[]>([]);
 const dbTableList = ref<DatabaseTable[]>([]);
 const ids = ref<number[]>([]);
@@ -744,9 +661,8 @@ const importQueryFormData = reactive<GenTableQueryParam>({
 });
 
 // 下拉选项数据
-const dictOptions = ref<DictOption[]>([]);
-const menuOptions = ref<MenuOption[]>([]);
-const subColumns = ref<GenTableColumnOutSchema[]>([]);
+const dictOptions = ref<DictTable[]>([]);
+const menuOptions = ref<OptionType[]>([]);
 
 // 表格数据
 type TableItem = {
@@ -767,7 +683,7 @@ const preview = reactive({
   open: false,
   title: "代码预览",
   data: {},
-  active_name: "model.py"
+  active_name: "controller.py"
 });
 
 const previewScope = ref<"all" | "frontend" | "backend" | "sql">('all');
@@ -781,7 +697,9 @@ const queryFormData = reactive<GenTableQueryParam>({
   page_no: 1,
   page_size: 10,
   table_name: undefined,
-  table_comment: undefined
+  table_comment: undefined,
+  start_time: undefined,
+  end_time: undefined,
 });
 
 // 表格列配置
@@ -806,6 +724,18 @@ const cmOptions: EditorConfiguration = {
   readOnly: true
 };
 
+// 处理日期范围变化
+function handleDateRangeChange(range: [Date, Date]) {
+  dateRange.value = range;
+  if (range && range.length === 2) {
+    queryFormData.start_time = formatToDateTime(range[0]);
+    queryFormData.end_time = formatToDateTime(range[1]);
+  } else {
+    queryFormData.start_time = undefined;
+    queryFormData.end_time = undefined;
+  }
+}
+
 // 工具函数
 const { copy } = useClipboard();
 
@@ -820,8 +750,8 @@ const filteredTreeData = computed<TreeNode[]>(() => {
     // scope 过滤：根据路径初步判断
     if (previewScope.value !== "all") {
       // 根据后端返回的格式，检查路径或文件名特征
-      const isPythonBackend = parentPath.some(part => part === 'python') || label.includes('.py');
-      const isVueFrontend = parentPath.some(part => part === 'vue') || label.includes('.vue') || label.includes('.ts');
+      const isPythonBackend = parentPath.some(part => part === 'backend' || part === 'python') || label.includes('.py');
+      const isVueFrontend = parentPath.some(part => part === 'frontend' || part === 'vue') || label.includes('.vue') || label.includes('.ts');
       const isSqlDatabase = parentPath.some(part => part === 'sql') || label.includes('.sql');
       
       if (previewScope.value === 'backend' && !isPythonBackend) return false;
@@ -830,10 +760,10 @@ const filteredTreeData = computed<TreeNode[]>(() => {
     }
     
     // 类型过滤：根据文件内容特征判断类型
-    if (label.includes('.py')) return previewTypes.value.includes('python');
-    if (label.includes('.sql')) return previewTypes.value.includes('sql');
-    if (label.includes('.vue')) return previewTypes.value.includes('vue');
-    if (label.includes('.ts')) return previewTypes.value.includes('ts');
+    if (label.endsWith('.py')) return previewTypes.value.includes('python');
+    if (label.endsWith('.sql')) return previewTypes.value.includes('sql');
+    if (label.endsWith('.vue')) return previewTypes.value.includes('vue');
+    if (label.endsWith('.ts')) return previewTypes.value.includes('ts');
     
     return true;
   };
@@ -909,9 +839,9 @@ function buildTree(data: FileData[]): TreeNode {
 
     // 添加文件节点
     currentNode.children?.push({
-      label: item.fileName,
+      label: item.file_name,
       content: item?.content,
-    });
+    }); 
   });
 
   return root;
@@ -945,7 +875,7 @@ async function handlePreview(row: GenTableOutVO): Promise<void> {
       
       return {
         path,
-        fileName,
+        file_name: fileName,
         content: contentStr
       } as FileData;
     });
@@ -980,17 +910,7 @@ async function handlePreview(row: GenTableOutVO): Promise<void> {
 async function loadingData(): Promise<void> {
   loading.value = true;
   try {
-    // 创建包含日期范围的查询参数
-    const queryParams = {
-      ...queryFormData,
-      // 添加日期范围参数
-      ...(dateRange.value.length > 0 ? {
-        start_time: dateRange.value[0],
-        end_time: dateRange.value[1]
-      } : {})
-    };
-    
-    const response = await GencodeAPI.listTable(queryParams);
+    const response = await GencodeAPI.listTable(queryFormData);
     if (response?.data?.data) {
       tableList.value = response.data.data.items;
       total.value = response.data.data.total;
@@ -1028,7 +948,9 @@ async function handleGenTable(row?: GenTableOutVO): Promise<void> {
       }
       
       await GencodeAPI.genCodeToPath(tbNames[0]);
+      ElMessage.success('代码已生成到指定路径');
     } else {
+      // ZIP压缩包下载
       const tableNamesArray = Array.isArray(tbNames) ? tbNames : [tbNames];
       const response = await GencodeAPI.batchGenCode(tableNamesArray);
       // 处理文件下载
@@ -1039,17 +961,13 @@ async function handleGenTable(row?: GenTableOutVO): Promise<void> {
       link.download = 'code.zip';
       link.click();
       URL.revokeObjectURL(url); // 释放URL对象
+      ElMessage.success('代码生成成功，正在下载...');
     }
   } catch (error) {
     console.error('生成代码失败:', error);
   } finally {
     loading.value = false;
   }
-}
-
-/** 工具栏生成代码按钮点击事件 */
-function handleGenTableClick(): void {
-  handleGenTable();
 }
 
 /** 同步数据库操作 */
@@ -1117,8 +1035,18 @@ function calculateTableHeight() {
   tableHeight.value = 680;
 }
 
+// 修改菜单选项过滤逻辑，添加递归过滤函数
+const filterMenuTypes = (nodes: MenuTable[]) => {
+  return nodes
+    .filter(node => node.type === MenuTypeEnum.CATALOG || node.type === MenuTypeEnum.MENU)
+    .map((node: any): any => ({
+      ...node,
+      children: node.children ? filterMenuTypes(node.children) : []
+    }));
+};
+
 /** 表格行内修改按钮操作 */
-async function handleEditTable(row?: GenTableOutVO): Promise<void> {
+async function handlePreviewTable(row?: GenTableOutVO): Promise<void> {
   const selectedTableId = row?.id || ids.value[0];
   if (selectedTableId) {
     // 设置编辑的表ID和名称
@@ -1126,7 +1054,12 @@ async function handleEditTable(row?: GenTableOutVO): Promise<void> {
     // 加载表详情数据
     await loadTableDetail(selectedTableId);
     editVisible.value = true;
-    
+
+    const menu_response = await MenuAPI.getMenuList();
+    menuOptions.value = formatTree(filterMenuTypes(menu_response.data.data));
+
+    const dict_response = await DictAPI.getDictTypeList({page_no: 1, page_size: 100});
+    dictOptions.value = dict_response.data.data.items;
     // 延迟计算表格高度，确保DOM已经渲染完成
     setTimeout(() => {
       calculateTableHeight();
@@ -1253,11 +1186,8 @@ async function handleQuery(): Promise<void> {
   await loadingData();
 }
 
-
-
 // 路由和导航
 const route = useRoute();
-const router = useRouter();
 
 
 // ===== 生命周期和初始化 =====
@@ -1284,26 +1214,14 @@ const info = reactive<GenTableOutVO>({
   business_name: '',
   function_name: '',
   gen_type: '0',
-  gen_path: '',
   parent_menu_id: undefined,
-  function_author: '',
   description: '',
   columns: [],
-  tpl_category: 'crud',
-  tpl_web_type: 'element-plus',
-  tree_code: '',
-  tree_parent_code: '',
-  tree_name: '',
-  sub_table_name: '',
-  sub_table_fk_name: '',
   sub: false,
   tree: false,
   crud: true,
   params: {
     parent_menu_id: undefined,
-    tree_code: '',
-    tree_name: '',
-    tree_parent_code: ''
   }
 });
 
@@ -1311,70 +1229,14 @@ const info = reactive<GenTableOutVO>({
 const rules = {
   table_name: [{ required: true, message: '表名称不能为空', trigger: 'blur' }],
   class_name: [{ required: true, message: '实体名称不能为空', trigger: 'blur' }],
-  function_author: [{ required: true, message: '作者不能为空', trigger: 'blur' }],
+  package_name: [{ required: true, message: '生成包路径不能为空', trigger: 'blur' }],
+  module_name: [{ required: true, message: '生成模块名不能为空', trigger: 'blur' }],
+  business_name: [{ required: true, message: '生成业务名不能为空', trigger: 'blur' }],
+  function_name: [{ required: true, message: '生成功能名不能为空', trigger: 'blur' }],
   parent_menu_id: [{ required: true, message: '所属菜单不能为空', trigger: 'change' }]
 };
 
 // ===== 工具函数
-
-
-
-/** 生成模板变更处理 */
-function tplSelectChange(): void {
-  // 当选择树表模板时，重置树相关字段
-  if (info.tpl_category === 'tree') {
-    info.tree_code = '';
-    info.tree_parent_code = '';
-    info.tree_name = '';
-  }
-  
-  // 当选择主子表模板时，重置子表相关字段
-  if (info.tpl_category === 'sub') {
-    info.sub_table_name = '';
-    info.sub_table_fk_name = '';
-    subColumns.value = [];
-  }
-}
-
-/** 子表选择变更处理 */
-async function subSelectChange(): Promise<void> {
-  if (!info.sub_table_name) {
-    subColumns.value = [];
-    return;
-  }
-  
-  try {
-    loading.value = true;
-    // 搜索指定表名的表信息
-    const response = await GencodeAPI.listTable({
-      table_name: info.sub_table_name,
-      page_no: 1,
-      page_size: 10
-    });
-    
-    if (response?.data?.data?.items && response.data.data.items.length > 0) {
-      const tableId = response.data.data.items[0].id;
-      if (tableId) {
-        // 获取表详情来获取字段信息
-        const detailResponse = await GencodeAPI.getGenTableDetail(tableId);
-        if (detailResponse?.data?.data?.rows) {
-          subColumns.value = detailResponse.data.data.rows;
-        }
-      }
-    }
-  } catch (error) {
-    console.error('获取子表字段失败:', error);
-  } finally {
-    loading.value = false;
-  }
-}
-
-/** 恢复默认生成路径 */
-function handleResetGenPath(): void {
-  // 这里可以根据实际情况设置默认路径
-  info.gen_path = '';
-}
-
 /** 提交表单 - 保存配置 */
 async function submitForm() {
   
@@ -1399,11 +1261,22 @@ async function submitForm() {
       return;
     }
     
+    // 设置params参数
+    if (info.parent_menu_id) {
+      info.params = {
+        parent_menu_id: info.parent_menu_id
+      };
+    }
+    
     // 提交表单数据，确保columns是必需的
     const tableData = {
       ...info,
       columns: info.columns || [] // 确保columns存在
     };
+    
+    // 清理不需要的字段
+    delete (tableData as any).params;
+    delete (tableData as any).parent_menu_id;
     const response = await GencodeAPI.updateTable(tableData as GenTableSchema, info.id || 0);
     
     if (response?.data?.code === 200) {
@@ -1418,54 +1291,7 @@ async function submitForm() {
   return false;
 }
 
-/** 生成代码 - 第四步执行 */
-async function generateCode() {
-  try {
-    // 先保存配置
-    const saved = await submitForm();
-    if (!saved) {
-      return;
-    }
-    
-    loading.value = true;
-    
-    // 执行代码生成
-    const tableName = info.table_name || 'unknown_table';
-    if (info.gen_type === '1') {
-      // 自定义路径生成
-      await GencodeAPI.genCodeToPath(tableName);
-      ElMessage.success('代码已生成到指定路径');
-    } else {
-      // ZIP压缩包下载
-      const response = await GencodeAPI.batchGenCode([tableName]);
-      // 处理文件下载
-      const blob = new Blob([response.data], { type: 'application/zip' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${tableName}_code.zip`;
-      link.click();
-      URL.revokeObjectURL(url); // 释放URL对象
-      ElMessage.success('代码生成成功，正在下载...');
-    }
-    
-    // 生成成功后关闭抽屉并返回列表页
-    editVisible.value = false;
-    setTimeout(() => {
-      router.push({
-        path: '/gencode/backcode/index',
-        query: { t: new Date().getTime() }
-      });
-    }, 1500);
-  } catch (error) {
-    console.error('生成代码失败:', error);
-    ElMessage.error('代码生成失败，请稍后重试');
-  } finally {
-    loading.value = false;
-  }
-}
 
-/** 关闭抽屉 */
 // 下一步
 async function nextStep(): Promise<void> {
   if (activeStep.value < 3) {
@@ -1541,11 +1367,6 @@ async function loadTableDetail(id: number | string) {
             columns.value = [...info.columns];
           }
         }
-      
-      // 如果是主子表，加载子表字段
-      if (info.tpl_category === 'sub' && info.sub_table_name) {
-        await subSelectChange();
-      }
       
       // 重置当前步骤为第一步
       activeStep.value = 0;

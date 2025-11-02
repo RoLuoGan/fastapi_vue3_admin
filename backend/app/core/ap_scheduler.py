@@ -3,6 +3,7 @@
 import json
 import importlib
 from datetime import datetime
+from sqlalchemy.orm.session import Session
 from typing import Union, List, Any, Optional
 from asyncio import iscoroutinefunction
 from apscheduler.job import Job
@@ -12,20 +13,23 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.executors.pool import ProcessPoolExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.jobstores.redis import RedisJobStore
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore 
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from concurrent.futures import ThreadPoolExecutor
 
+from app.api.v1.module_application.job.model import JobModel
 from app.config.setting import settings
-from app.core.database import SessionLocal, AsyncSessionLocal
+from app.core.database import SessionLocal, AsyncSessionLocal, engine
 from app.core.exceptions import CustomException
 from app.core.logger import logger
+from app.utils.cron_util import CronUtil
 
 
 job_stores = {
     'default': MemoryJobStore(),
-    # 'sqlalchemy': SQLAlchemyJobStore(url=settings.DB_URI, engine=engine), 如果用同一个数据库会有lock冲突
+    'sqlalchemy': SQLAlchemyJobStore(url=settings.DB_URI, engine=engine), 
     'redis': RedisJobStore(
         host=settings.REDIS_HOST,
         port=int(settings.REDIS_PORT),
@@ -118,7 +122,7 @@ class SchedulerUtil:
                     job_id=job_id,
                 )
                 
-                # 使用线程池执行异步操作以避免阻塞调度器和数据库锁定问题
+                # 使用线程池执行操作以避免阻塞调度器和数据库锁定问题
                 executor = ThreadPoolExecutor(max_workers=1)
                 executor.submit(cls._save_job_log_async_wrapper, job_log)
                 executor.shutdown(wait=False)
@@ -134,27 +138,15 @@ class SchedulerUtil:
         返回:
         - None
         """
-        import asyncio
-        from app.core.database import AsyncSessionLocal
-        
-        async def _save_job_log_async():
-            async with AsyncSessionLocal() as session:
-                try:
-                    session.add(job_log)
-                    await session.commit()
-                except Exception as e:
-                    await session.rollback()
-                    logger.error(f"保存任务日志失败: {str(e)}")
-                finally:
-                    await session.close()
-        
-        # 创建新的事件循环
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(_save_job_log_async())
-        finally:
-            loop.close()
+        with SessionLocal() as session:
+            try:
+                session.add(job_log)
+                session.commit()
+            except Exception as e:
+                session.rollback()
+                logger.error(f"保存任务日志失败: {str(e)}")
+            finally:
+                session.close()
 
     @classmethod
     async def init_system_scheduler(cls):
@@ -167,7 +159,7 @@ class SchedulerUtil:
         # 延迟导入避免循环导入
         from app.api.v1.module_application.job.crud import JobCRUD
         from app.api.v1.module_system.auth.schema import AuthSchema
-        
+        logger.info('🔎 开始启动定时任务...')
         scheduler.start()
         async with AsyncSessionLocal() as session:
             async with session.begin():
@@ -177,6 +169,7 @@ class SchedulerUtil:
                     cls.remove_job(job_id=item.id)  # 删除旧任务
                     cls.add_job(item)
         scheduler.add_listener(cls.scheduler_event_listener, EVENT_ALL)
+        logger.info('✅️ 系统初始定时任务加载成功')
 
     @classmethod
     async def close_system_scheduler(cls):
@@ -191,7 +184,7 @@ class SchedulerUtil:
             scheduler.remove_all_jobs()
             # 等待所有任务完成后再关闭
             scheduler.shutdown(wait=True)
-            logger.info('关闭定时任务成功')
+            logger.info('✅️ 关闭定时任务成功')
         except Exception as e:
             logger.error(f'关闭定时任务失败: {str(e)}')
 
@@ -219,12 +212,12 @@ class SchedulerUtil:
         return scheduler.get_jobs()
 
     @classmethod
-    def add_job(cls, job_info):
+    def add_job(cls, job_info: JobModel) -> Job:
         """
         根据任务配置创建并添加调度任务。
     
         参数:
-        - job_info (Any): 任务对象信息（包含触发器、函数、参数等）。
+        - job_info (JobModel): 任务对象信息（包含触发器、函数、参数等）。
     
         返回:
         - Job: 新增的任务对象。
@@ -238,8 +231,15 @@ class SchedulerUtil:
             module = importlib.import_module(module_path)
             job_func = getattr(module, func_name)
             
+            if job_info.jobstore is None:
+                job_info.jobstore = 'default'
             # 2. 确定执行器
             job_executor = job_info.executor
+            if job_executor is None:
+                job_executor = 'default'
+            if job_info.trigger_args is None:
+                    raise ValueError("interval 触发器缺少参数")
+            
             if iscoroutinefunction(job_func):
                 job_executor = 'default'
             if job_info.trigger == 'date':
@@ -267,6 +267,8 @@ class SchedulerUtil:
                 fields = job_info.trigger_args.strip().split()
                 if len(fields) not in (6, 7):
                     raise ValueError("无效的 Cron 表达式")
+                if not CronUtil.validate_cron_expression(job_info.trigger_args):
+                    raise ValueError(f'定时任务{job_info.name}, Cron表达式不正确')
 
                 parsed_fields = [None if field in ('*', '?') else field for field in fields]
                 if len(fields) == 6:

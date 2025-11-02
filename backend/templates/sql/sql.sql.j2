@@ -18,7 +18,7 @@ VALUES (
   {{ b_true }},
   '{{ permission_prefix }}:query',
   NULL,
-  '{{ business_name|snake_to_pascal_case }}',
+  '{{ business_name|snake_to_camel }}',
   '/{{ module_name }}/{{ business_name }}',
   '{{ module_name }}/{{ business_name }}/index',
   NULL,
@@ -66,7 +66,7 @@ WITH parent AS (
     {{ b_true }},
     '{{ permission_prefix }}:query',
     NULL,
-    '{{ business_name|snake_to_pascal_case }}',
+    '{{ business_name|snake_to_camel }}',
     '/{{ module_name }}/{{ business_name }}',
     '{{ module_name }}/{{ business_name }}/index',
     NULL,
@@ -102,7 +102,7 @@ SELECT '{{ function_name }}下载导入模板', 3, 8, {{ b_true }}, '{{ permissi
 {% else %}
 -- 未识别的数据库类型，默认按 MySQL 处理
 INSERT INTO `system_menu` (name, type, {{ order_col }}, status, permission, icon, route_name, route_path, component_path, redirect, hidden, keep_alive, always_show, title, params, affix, parent_id, description, created_at, updated_at)
-VALUES ('{{ function_name }}', 2, 1, {{ b_true }}, '{{ permission_prefix }}:query', NULL, '{{ business_name|snake_to_pascal_case }}', '/{{ module_name }}/{{ business_name }}', '{{ module_name }}/{{ business_name }}/index', NULL, {{ b_false }}, {{ b_true }}, {{ b_false }}, '{{ function_name }}', NULL, {{ b_false }}, {{ parent_menu_id if parent_menu_id else 'NULL' }}, '{{ function_name }}菜单', now(), now());
+VALUES ('{{ function_name }}', 2, 1, {{ b_true }}, '{{ permission_prefix }}:query', NULL, '{{ business_name|snake_to_camel }}', '/{{ module_name }}/{{ business_name }}', '{{ module_name }}/{{ business_name }}/index', NULL, {{ b_false }}, {{ b_true }}, {{ b_false }}, '{{ function_name }}', NULL, {{ b_false }}, {{ parent_menu_id if parent_menu_id else 'NULL' }}, '{{ function_name }}菜单', now(), now());
 SELECT @parentId := LAST_INSERT_ID();
 INSERT INTO `system_menu` (name, type, {{ order_col }}, status, permission, icon, route_name, route_path, component_path, redirect, hidden, keep_alive, always_show, title, params, affix, parent_id, description, created_at, updated_at)
 VALUES ('{{ function_name }}查询', 3, 1, {{ b_true }}, '{{ permission_prefix }}:query',   NULL, NULL, NULL, NULL, NULL, {{ b_false }}, {{ b_true }}, {{ b_false }}, '{{ function_name }}查询',   NULL, {{ b_false }}, @parentId, '', now(), now());

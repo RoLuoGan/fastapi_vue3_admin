@@ -61,7 +61,7 @@ async def get_gen_db_table_list_controller(
     返回:
     - JSONResponse: 包含查询结果和分页信息的JSON响应
     """
-    result_dict_list = await GenTableService.get_gen_db_table_list_service(auth=auth, search=search, order_by=page.order_by)
+    result_dict_list = await GenTableService.get_gen_db_table_list_service(auth=auth, search=search)
     result_dict = await PaginationService.paginate(data_list=result_dict_list, page_no=page.page_no, page_size=page.page_size)
     logger.info('获取数据库表列表成功')
     return SuccessResponse(data=result_dict, msg="获取数据库表列表成功")
@@ -103,9 +103,7 @@ async def gen_table_detail_controller(
     返回:
     - JSONResponse: 包含业务表详细信息的JSON响应
     """
-    gen_table = await GenTableService.get_gen_table_by_id_service(auth, table_id)
-    gen_tables = await GenTableService.get_gen_table_all_service(auth)
-    gen_table_detail_result = dict(info=gen_table.model_dump(), rows=gen_table.model_dump()['columns'], tables=[gen_table.model_dump() for gen_table in gen_tables])
+    gen_table_detail_result = await GenTableService.get_gen_table_detail_service(auth, table_id)
     logger.info(f'获取table_id为{table_id}的信息成功')
     return SuccessResponse(data=gen_table_detail_result, msg="获取业务表详细信息成功")
 
@@ -147,7 +145,6 @@ async def update_gen_table_controller(
     返回:
     - JSONResponse: 包含编辑结果的JSON响应
     """
-    await GenTableService.validate_edit(data)
     result_dict = await GenTableService.update_gen_table_service(auth, data, table_id)
     logger.info('编辑业务表信息成功')
     return SuccessResponse(data=result_dict, msg="编辑业务表信息成功")
@@ -188,18 +185,8 @@ async def batch_gen_code_controller(
     返回:
     - StreamResponse: 包含批量生成代码的ZIP文件流响应
     """
-    # 检查table_names是否为空
-    if not table_names:
-        logger.error('表名列表不能为空')
-        # 返回一个空的StreamResponse，包含错误信息
-        error_content = bytes(f'{RET.ERROR.msg}: 表名列表不能为空', 'utf-8')
-        return StreamResponse(
-            data=bytes2file_response(error_content),
-            media_type='text/plain',
-            headers={'Content-Disposition': 'attachment; filename=error.txt'}
-        )
     batch_gen_code_result = await GenTableService.batch_gen_code_service(auth, table_names)
-    logger.info('批量生成代码成功')
+    logger.info(f'批量生成代码成功,表名列表：{table_names}')
     return StreamResponse(
         data=bytes2file_response(batch_gen_code_result),
         media_type='application/zip',
@@ -223,7 +210,7 @@ async def gen_code_local_controller(
     - JSONResponse: 包含生成结果的JSON响应
     """
     result = await GenTableService.generate_code_service(auth, table_name)
-    logger.info('生成代码到指定路径成功')
+    logger.info(f'生成代码,表名：{table_name},到指定路径成功')
     return SuccessResponse(msg="生成代码到指定路径成功", data=result)
 
 
@@ -243,11 +230,11 @@ async def preview_code_controller(
     - JSONResponse: 包含预览代码的JSON响应
     """
     preview_code_result = await GenTableService.preview_code_service(auth, table_id)
-    logger.info('预览代码成功')
+    logger.info(f'预览代码,表id：{table_id},成功')
     return SuccessResponse(data=preview_code_result, msg="预览代码成功")
 
 
-@GenRouter.post("/synch_db/{table_name}", summary="同步数据库", description="同步数据库")
+@GenRouter.post("/sync_db/{table_name}", summary="同步数据库", description="同步数据库")
 async def sync_db_controller(
     table_name: str = Path(..., description="表名"),
     auth: AuthSchema = Depends(AuthPermission(["generator:db:sync"]))
@@ -263,5 +250,5 @@ async def sync_db_controller(
     - JSONResponse: 包含同步数据库结果的JSON响应
     """
     result = await GenTableService.sync_db_service(auth, table_name)
-    logger.info('同步数据库成功')
+    logger.info(f'同步数据库,表名：{table_name},成功')
     return SuccessResponse(msg="同步数据库成功", data=result)

@@ -17,18 +17,12 @@ class GenTableModel(CreatorMixin):
 
     table_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, default='', comment='表名称')
     table_comment: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, default='', comment='表描述')
-    sub_table_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment='关联子表的表名')
-    sub_table_fk_name: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment='子表关联的外键名')
     class_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, default='', comment='实体类名称')
-    tpl_category: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, default='crud', comment='使用的模板（crud单表操作 tree树表操作）')
-    tpl_web_type: Mapped[Optional[str]] = mapped_column(String(30), nullable=True, default='', comment='前端模板类型（element-ui模版 element-plus模版）')
     package_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment='生成包路径')
     module_name: Mapped[Optional[str]] = mapped_column(String(30), nullable=True, comment='生成模块名')
     business_name: Mapped[Optional[str]] = mapped_column(String(30), nullable=True, comment='生成业务名')
     function_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment='生成功能名')
-    function_author: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment='生成功能作者')
-    gen_type: Mapped[Optional[str]] = mapped_column(String(1), nullable=True, default='0', comment='生成代码方式（0zip压缩包 1自定义路径）')
-    gen_path: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, default='/', comment='生成路径（不填默认项目路径）')
+    gen_type: Mapped[Optional[str]] = mapped_column(String(1), nullable=True, default='0', comment='生成代码方式（0zip压缩包 1生成项目路径）')
     options: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True, comment='其它生成选项')
     
     # 关系定义

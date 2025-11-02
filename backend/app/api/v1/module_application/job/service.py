@@ -63,10 +63,10 @@ class JobService:
         exist_obj = await JobCRUD(auth).get(name=data.name)
         if exist_obj:
             raise CustomException(msg='创建失败，该定时任务已存在')
-        if data.trigger == 'cron' and data.trigger_args and not CronUtil.validate_cron_expression(data.trigger_args):
-            raise CustomException(msg=f'新增定时任务{data.name}失败, Cron表达式不正确')
         
         obj = await JobCRUD(auth).create_obj_crud(data=data)
+        if not obj:
+            raise CustomException(msg='创建失败，该数据定时任务不存在')
         SchedulerUtil().add_job(job_info=obj)
         return JobOutSchema.model_validate(obj).model_dump()
     
@@ -109,6 +109,10 @@ class JobService:
             exist_obj = await JobCRUD(auth).get_obj_by_id_crud(id=id)
             if not exist_obj:
                 raise CustomException(msg='删除失败，该数据定时任务不存在')
+            obj = await JobLogCRUD(auth).get(job_id=id)
+            if obj:
+                raise CustomException(msg=f'删除失败，该定时任务存 {exist_obj.name} 在日志记录')
+
             SchedulerUtil.remove_job(job_id=id)
         await JobCRUD(auth).delete_obj_crud(ids=ids)
         
@@ -122,6 +126,7 @@ class JobService:
         - auth (AuthSchema): 认证信息模型
         """
         SchedulerUtil().clear_jobs()
+        await JobLogCRUD(auth).clear_obj_log_crud()
         await JobCRUD(auth).clear_obj_crud()
 
     @classmethod

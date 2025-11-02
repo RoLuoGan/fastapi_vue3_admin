@@ -94,7 +94,7 @@ const GencodeAPI = {
   // 同步数据库
   syncDb(table_name: string) {
     return request<ApiResponse>({
-      url: `${API_PATH}/synch_db/${table_name}`,
+      url: `${API_PATH}/sync_db/${table_name}`,
       method: 'post'
     })
   }
@@ -153,16 +153,8 @@ export interface GenTableOutVO {
   table_name?: string;
   /** 表描述 */
   table_comment?: string;
-  /** 关联子表的表名 */
-  sub_table_name?: string;
-  /** 子表关联的外键名 */
-  sub_table_fk_name?: string;
   /** 实体类名称 */
   class_name?: string;
-  /** 使用的模板（crud单表操作 tree树表操作） */
-  tpl_category?: string;
-  /** 前端模板类型（element-ui模版 element-plus模版） */
-  tpl_web_type?: string;
   /** 生成包路径 */
   package_name?: string;
   /** 生成模块名 */
@@ -171,20 +163,10 @@ export interface GenTableOutVO {
   business_name?: string;
   /** 生成功能名 */
   function_name?: string;
-  /** 生成功能作者 */
-  function_author?: string;
   /** 生成代码方式（0zip压缩包 1自定义路径） */
   gen_type?: string;
-  /** 生成路径（不填默认项目路径） */
-  gen_path?: string;
   /** 其它生成选项 */
   options?: string;
-  /** 树编码字段 */
-  tree_code?: string;
-  /** 树父编码字段 */
-  tree_parent_code?: string;
-  /** 树名称字段 */
-  tree_name?: string;
   /** 上级菜单ID字段 */
   parent_menu_id?: number;
   /** 上级菜单名称字段 */
@@ -207,12 +189,6 @@ export interface GenTableOutVO {
 export interface GenTableOptionModel {
   /** 所属父级分类 */
   parent_menu_id?: number;
-  /** 树编码 */
-  tree_code?: string;
-  /** 树名称 */
-  tree_name?: string;
-  /** 树父编码 */
-  tree_parent_code?: string;
 }
 
 /** 代码生成业务表模型 */
@@ -333,14 +309,6 @@ export interface TableInfo {
 }
 
 /**
- * 字典选项接口
- */
-export interface DictOption {
-  dict_type: string;
-  dict_name: string;
-}
-
-/**
  * 导入表查询表单数据接口
  */
 export interface ImportTableQueryForm {
@@ -357,6 +325,5 @@ export interface BasicInfoFormData {
   table_name?: string;
   table_comment?: string;
   class_name?: string;
-  function_author?: string;
   remark?: string;
 }

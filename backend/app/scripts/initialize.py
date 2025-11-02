@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Dict, List
@@ -10,15 +11,12 @@ from app.core.logger import logger
 from app.core.database import AsyncSessionLocal, async_engine
 from app.core.base_model import MappedBase
 from app.config.setting import settings
-
-from app.api.v1.module_system.user.model import UserModel, UserRolesModel, UserPositionsModel
-from app.api.v1.module_system.role.model import RoleModel, RoleDeptsModel, RoleMenusModel
-from app.api.v1.module_system.position.model import PositionModel
+from app.api.v1.module_system.user.model import UserModel, UserRolesModel
+from app.api.v1.module_system.role.model import RoleModel
 from app.api.v1.module_system.dept.model import DeptModel
 from app.api.v1.module_system.menu.model import MenuModel
 from app.api.v1.module_system.params.model import ParamsModel
 from app.api.v1.module_system.dict.model import DictTypeModel, DictDataModel
-from app.api.v1.module_system.notice.model import NoticeModel
 
 
 class InitializeData:
@@ -52,6 +50,9 @@ class InitializeData:
             async with async_engine.begin() as conn:
                 await conn.run_sync(MappedBase.metadata.create_all)
             logger.info("✅️ 数据库表结构初始化完成")
+        except asyncio.exceptions.TimeoutError:
+            logger.error("❌️ 数据库表结构初始化超时")
+            raise
         except Exception as e:
             logger.error(f"❌️ 数据库表结构初始化失败: {str(e)}")
             raise

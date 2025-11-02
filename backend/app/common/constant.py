@@ -326,14 +326,6 @@ class GenConstant:
     """
     代码生成常量
 
-    TPL_CRUD: 单表（增删改查
-    TPL_TREE: 树表（增删改查）
-    TPL_SUB: 主子表（增删改查）
-    TREE_CODE: 树编码字段
-    TREE_PARENT_CODE: 树父编码字段
-    TREE_NAME: 树名称字段
-    PARENT_MENU_ID: 上级菜单ID字段
-    PARENT_MENU_NAME: 上级菜单名称字段
     COLUMNTYPE_STR: 数据库字符串类型
     COLUMNTYPE_TEXT: 数据库文本类型
     COLUMNTYPE_TIME: 数据库时间类型
@@ -361,30 +353,6 @@ class GenConstant:
     DB_TO_SQLALCHEMY_TYPE_MAPPING: 数据库类型与sqlalchemy类型映射
     DB_TO_PYTHON_TYPE_MAPPING: 数据库类型与python类型映射
     """
-
-    # 单表（增删改查）
-    TPL_CRUD = "crud"
-    
-    # 树表（增删改查）
-    TPL_TREE = "tree"
-    
-    # 主子表（增删改查）
-    TPL_SUB = "sub"
-    
-    # 树编码字段
-    TREE_CODE = "treeCode"
-    
-    # 树父编码字段
-    TREE_PARENT_CODE = "treeParentCode"
-    
-    # 树名称字段
-    TREE_NAME = "treeName"
-    
-    # 上级菜单ID字段
-    PARENT_MENU_ID = "parentMenuId"
-    
-    # 上级菜单名称字段
-    PARENT_MENU_NAME = "parentMenuName"
     
     # 数据库字符串类型
     COLUMNTYPE_STR = (

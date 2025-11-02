@@ -10,7 +10,7 @@ from app.config.setting import settings
 
 console = get_console()
 
-def run(host: str, port: int, reload: bool, workers: int) -> None:
+def run(host: str, port: int, reload: bool, workers: int, *, redis_ready: bool | None = None, scheduler_jobs: int | None = None, scheduler_status: str | None = None) -> None:
     url = f'http://{host}:{port}'
     base_url = f'{url}{settings.ROOT_PATH}'
     docs_url = base_url + settings.DOCS_URL
@@ -24,10 +24,18 @@ def run(host: str, port: int, reload: bool, workers: int) -> None:
     panel_content.append(f'\n数据库类型: {settings.DATABASE_TYPE}')
     panel_content.append(f'\n日志级别: {settings.LOGGER_LEVEL}')
     panel_content.append(f'\n重载: {reload}  进程: {workers}')
+
+    # 附加运行时组件状态
+    if redis_ready is not None:
+        panel_content.append(f'\nRedis: {"Ready" if redis_ready else "Disabled/Not Ready"}')
+    if scheduler_status is not None:
+        jobs_text = f'{scheduler_jobs or 0} jobs'
+        panel_content.append(f'\nScheduler: {scheduler_status} ({jobs_text})')
+
     panel_content.append('\n官方地址: https://service.fastapiadmin.com')
 
     if settings.DEBUG:
         panel_content.append(f'\n\n📖 Swagger 文档: {docs_url}', style='yellow')
         panel_content.append(f'\n📚 Redoc   文档: {redoc_url}', style='blue')
 
-    console.print(Panel(panel_content, title='FastAPI_Vue3_Admin 服务信息', border_style='purple', padding=(1, 2)))
+    console.print(Panel(panel_content, title='FastapiAdmin 服务信息', border_style='purple', padding=(1, 2)))

@@ -149,7 +149,7 @@
         
         <!-- 空状态 -->
         <div v-if="applicationList.length === 0 && !loading" >
-          <el-empty :image-size="120" description="暂无应用" />
+          <el-empty :image-size="80" description="暂无数据" />
         </div>
 
         <!-- 分页区域 -->

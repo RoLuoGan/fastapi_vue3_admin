@@ -24,8 +24,8 @@
             clearable
             style="width: 167.5px"
           >
-            <el-option value="true" label="启用" />
-            <el-option value="false" label="停用" />
+            <el-option value="true" label="运行中" />
+            <el-option value="false" label="暂停" />
           </el-select>
         </el-form-item>
         <!-- 时间范围，收起状态下隐藏 -->
@@ -190,7 +190,7 @@
         <el-table-column label="状态" prop="status" min-width="100">
           <template #default="scope">
             <el-tag :type="scope.row.status === true ? 'success' : 'danger'">
-              {{ scope.row.status === true ? "启用" : "停用" }}
+              {{ scope.row.status === true ? "运行中" : "暂停" }}
             </el-tag>
           </template>
         </el-table-column>
@@ -254,12 +254,14 @@
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item
+                      :disabled="scope.row.status === false"
                       icon="Check"
                       @click="handleOption(scope.row.id, 1)"
                     >
                       暂停
                     </el-dropdown-item>
                     <el-dropdown-item
+                      :disabled="scope.row.status === true"
                       icon="CircleClose"
                       @click="handleOption(scope.row.id, 2)"
                     >
@@ -324,7 +326,7 @@
           </el-descriptions-item>
           <el-descriptions-item label="状态" :span="2">
             <el-tag :type="detailFormData.status ? 'success' : 'danger'">
-              {{ detailFormData.status ? "启用" : "停用" }}
+              {{ detailFormData.status ? "运行中" : "暂停" }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="最大实例数" :span="2">{{
