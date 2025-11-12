@@ -4,6 +4,14 @@ const API_PATH = "/operations/node";
 
 const NodeAPI = {
   // 服务模块相关
+  getServicePage(query: ServicePageQuery) {
+    return request<ApiResponse<PageResult<ServiceTable[]>>>({
+      url: `${API_PATH}/service/page`,
+      method: "get",
+      params: query,
+    });
+  },
+
   getServiceTree(query?: ServiceQueryParam) {
     return request<ApiResponse<ServiceTable[]>>({
       url: `${API_PATH}/service/tree`,
@@ -44,6 +52,14 @@ const NodeAPI = {
   },
 
   // 节点相关
+  getNodePage(query: NodePageQuery) {
+    return request<ApiResponse<PageResult<NodeTable[]>>>({
+      url: `${API_PATH}/node/page`,
+      method: "get",
+      params: query,
+    });
+  },
+
   getNodeDetail(id: number) {
     return request<ApiResponse<NodeTable>>({
       url: `${API_PATH}/node/detail/${id}`,
@@ -76,11 +92,41 @@ const NodeAPI = {
   },
 
   // 任务相关
+  getTaskPage(query: TaskPageQuery) {
+    return request<ApiResponse<PageResult<TaskTable[]>>>({
+      url: `${API_PATH}/task/page`,
+      method: "get",
+      params: query,
+    });
+  },
+
   getRecentTasks(limit?: number) {
     return request<ApiResponse<TaskTable[]>>({
       url: `${API_PATH}/task/recent`,
       method: "get",
       params: { limit },
+    });
+  },
+
+  getTaskDetail(id: number) {
+    return request<ApiResponse<TaskDetail>>({
+      url: `${API_PATH}/task/detail/${id}`,
+      method: "get",
+    });
+  },
+
+  getTaskLog(id: number) {
+    return request<ApiResponse<TaskLog>>({
+      url: `${API_PATH}/task/log/${id}`,
+      method: "get",
+    });
+  },
+
+  deleteTask(body: number[]) {
+    return request<ApiResponse>({
+      url: `${API_PATH}/task/delete`,
+      method: "delete",
+      data: body,
     });
   },
 
@@ -105,6 +151,14 @@ const NodeAPI = {
 export default NodeAPI;
 
 export interface ServiceQueryParam {
+  name?: string;
+  code?: string;
+  status?: boolean;
+  start_time?: string;
+  end_time?: string;
+}
+
+export interface ServicePageQuery extends PageQuery {
   name?: string;
   code?: string;
   status?: boolean;
@@ -154,14 +208,48 @@ export interface NodeForm {
   description?: string;
 }
 
+export interface NodePageQuery extends PageQuery {
+  service_id?: number;
+  ip?: string;
+  status?: boolean;
+  start_time?: string;
+  end_time?: string;
+}
+
 export interface TaskTable {
   id?: number;
+  service_id?: number;
+  service_name?: string;
   node_id?: number;
+  node_name?: string;
   ip?: string;
   task_type?: string;
   task_status?: string;
+  progress?: number;
+  params?: Record<string, any> | null;
+  log_path?: string | null;
   error_message?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface TaskPageQuery extends PageQuery {
+  task_type?: string;
+  task_status?: string;
+  service_id?: number;
+  node_id?: number;
+  ip?: string;
+  start_time?: string;
+  end_time?: string;
+}
+
+export interface TaskDetail extends TaskTable {
+  log_size?: number;
+  node?: NodeTable;
+  service?: ServiceTable;
+}
+
+export interface TaskLog {
+  content: string;
 }
 

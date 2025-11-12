@@ -133,10 +133,28 @@
             </div>
           </template>
           <div class="task-list">
-            <div v-for="task in taskList" :key="task.id" class="task-item">
+            <div
+              v-for="task in taskList"
+              :key="task.id"
+              class="task-item"
+              @click="handleOpenTaskDetailFromList(task.id)"
+            >
               <div class="task-header">
-                <span class="task-ip">{{ task.ip }}</span>
-                <span class="task-type">{{ task.task_type === 'deploy' ? '部署' : '重启' }}</span>
+                <div>
+                  <span class="task-ip">{{ task.ip }}</span>
+                  <span class="task-service">{{ task.service_name || '-' }}</span>
+                </div>
+                <el-tag size="small" :type="task.task_type === 'deploy' ? 'success' : 'warning'">
+                  {{ task.task_type === 'deploy' ? '部署' : '重启' }}
+                </el-tag>
+              </div>
+              <div class="task-progress">
+                <el-progress
+                  :percentage="task.progress || 0"
+                  :status="progressStatus(task.task_status)"
+                  :text-inside="true"
+                  :stroke-width="14"
+                />
               </div>
               <div class="task-info">
                 <span class="task-time">{{ task.created_at || '-' }}</span>
@@ -256,6 +274,7 @@ defineOptions({
 });
 
 import NodeAPI, { ServiceTable, NodeTable, TaskTable, ServiceForm, NodeForm, ServiceQueryParam } from "@/api/operations/node";
+import { useRouter } from "vue-router";
 import { QuestionFilled, CircleCheck, CircleClose, Loading } from "@element-plus/icons-vue";
 
 const queryFormRef = ref();
@@ -318,6 +337,7 @@ const serviceOptions = ref<ServiceTable[]>([]);
 
 // 任务列表
 const taskList = ref<TaskTable[]>([]);
+const router = useRouter();
 
 // 表单验证规则
 const serviceRules = reactive({
@@ -651,6 +671,19 @@ function getTaskStatusText(status: string) {
   return statusMap[status] || status;
 }
 
+function progressStatus(status?: string) {
+  if (status === 'success') return 'success';
+  if (status === 'failed') return 'exception';
+  return undefined;
+}
+
+function handleOpenTaskDetailFromList(taskId?: number) {
+  if (!taskId) return;
+  router.push({
+    path: `/operations/task/detail/${taskId}`,
+  });
+}
+
 onMounted(() => {
   loadingData();
   loadRecentTasks();
@@ -673,6 +706,13 @@ onMounted(() => {
   border: 1px solid #e5e7eb;
   border-radius: 4px;
   background: #f9fafb;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: #409eff;
+    background: #f0f9ff;
+  }
 }
 
 .task-header {
@@ -680,6 +720,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
+  gap: 8px;
 }
 
 .task-ip {
@@ -687,12 +728,14 @@ onMounted(() => {
   color: #303133;
 }
 
-.task-type {
-  padding: 2px 8px;
-  background: #409eff;
-  color: white;
-  border-radius: 2px;
+.task-service {
   font-size: 12px;
+  margin-left: 8px;
+  color: #909399;
+}
+
+.task-progress {
+  margin-bottom: 6px;
 }
 
 .task-info {

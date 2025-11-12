@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-服务节点管理模型模块
-定义服务模块和节点相关数据模型
+运维管理领域模型
 """
 
 from typing import Optional, List
@@ -52,12 +51,20 @@ class TaskModel(CreatorMixin):
     """
     __tablename__ = "operations_task"
     __table_args__ = ({'comment': '任务表'})
-    __loader_options__ = ["creator"]
+    __loader_options__ = ["creator", "node", "service"]
 
     # 基础字段
+    service_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("operations_service.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, index=True, comment="服务模块ID")
     node_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("operations_node.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, index=True, comment="节点ID")
     ip: Mapped[str] = mapped_column(String(50), nullable=False, comment="任务IP地址")
     task_type: Mapped[str] = mapped_column(String(20), nullable=False, comment="任务类型(deploy:部署, restart:重启)")
     task_status: Mapped[str] = mapped_column(String(20), nullable=False, default="running", comment="任务状态(running:执行中, success:完成, failed:失败)")
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="任务进度百分比")
+    log_path: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="任务日志文件路径")
+    params: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="构建参数JSON")
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="错误信息")
+
+    # 关联关系
+    node: Mapped[Optional["NodeModel"]] = relationship(lazy="selectin")
+    service: Mapped[Optional["ServiceModel"]] = relationship(lazy="selectin")
 

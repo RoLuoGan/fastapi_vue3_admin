@@ -2,11 +2,13 @@
 
 from fastapi import APIRouter
 
-from .node.controller import NodeRouter
+from .service_module import ServiceRouter
+from .server import ServerRouter
+from .task import TaskRouter
 
 
 OperationsRouter = APIRouter(prefix="/operations")
-
-# 包含所有子路由
-OperationsRouter.include_router(NodeRouter)
+OperationsRouter.include_router(ServiceRouter)
+OperationsRouter.include_router(ServerRouter)
+OperationsRouter.include_router(TaskRouter)
 

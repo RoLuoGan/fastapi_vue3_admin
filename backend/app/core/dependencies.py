@@ -5,9 +5,8 @@ from redis.asyncio.client import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from typing import AsyncGenerator, Optional
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from fastapi import Depends
 
 from app.api.v1.module_system.user.schema import UserOutSchema
 from app.api.v1.module_system.user.model import UserModel
@@ -54,79 +53,85 @@ async def mongo_getter(request: Request) -> AsyncIOMotorDatabase:
     """ 
     return request.app.state.mongo
 
+async def _build_auth_schema(
+    *, request: Request, token: str, db: AsyncSession, redis: Redis
+) -> AuthSchema:
+    """
+    根据token构建AuthSchema对象，提取用户并完成在线校验
+    """
+    if not token:
+        raise CustomException(msg="认证已失效", code=10401, status_code=401)
+
+    # 处理Bearer token
+    if token.startswith("Bearer"):
+        token = token.split(" ")[1]
+
+    payload = decode_access_token(token)
+    if not payload or not hasattr(payload, "is_refresh") or payload.is_refresh:
+        raise CustomException(msg="非法凭证", code=10401, status_code=401)
+
+    online_user_info = payload.sub
+    user_info = json.loads(online_user_info)
+
+    session_id = user_info.get("session_id")
+    if not session_id:
+        raise CustomException(msg="认证已失效", code=10401, status_code=401)
+
+    online_ok = await RedisCURD(redis).exists(
+        key=f"{RedisInitKeyConfig.ACCESS_TOKEN.key}:{session_id}"
+    )
+    if not online_ok:
+        raise CustomException(msg="认证已失效", code=10401, status_code=401)
+
+    auth = AuthSchema(db=db, check_data_scope=False)
+    username = user_info.get("user_name")
+    if not username:
+        raise CustomException(msg="认证已失效", code=10401, status_code=401)
+
+    user = await UserCRUD(auth).get_by_username_crud(
+        username=username,
+        preload=[
+            "dept",
+            selectinload(UserModel.roles).selectinload(RoleModel.creator),
+            "positions",
+            "creator",
+        ],
+    )
+    if not user:
+        raise CustomException(msg="用户不存在", code=10401, status_code=401)
+    if not user.status:
+        raise CustomException(msg="用户已被停用", code=10401, status_code=401)
+
+    request.scope["user_id"] = user.id
+    request.scope["user_username"] = user.username
+
+    if hasattr(user, "roles"):
+        user.roles = [role for role in user.roles if role and role.status]
+    if hasattr(user, "positions"):
+        user.positions = [pos for pos in user.positions if pos and pos.status]
+
+    auth.user = UserOutSchema.model_validate(user)
+    return auth
+
+
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(db_getter),
     redis: Redis = Depends(redis_getter),
     token: str = Depends(OAuth2Schema),
 ) -> AuthSchema:
-    """获取当前用户
-    
-    参数:
-    - request (Request): 请求对象
-    - db (AsyncSession): 数据库会话
-    - redis (Redis): Redis连接
-    - token (str): 访问令牌
-    
-    返回:
-    - AuthSchema: 认证信息模型
-    """
-    if not token:
-        raise CustomException(msg="认证已失效", code=10401, status_code=401)
-    
-    # 处理Bearer token
-    if token.startswith('Bearer'):
-        token = token.split(' ')[1]
+    """获取当前用户"""
+    return await _build_auth_schema(request=request, token=token, db=db, redis=redis)
 
-    payload = decode_access_token(token)
-    if not payload or not hasattr(payload, 'is_refresh') or payload.is_refresh:
-        raise CustomException(msg="非法凭证", code=10401, status_code=401)
-        
-    online_user_info = payload.sub
-    # 从Redis中获取用户信息
-    user_info = json.loads(online_user_info)  # 确保是字典类型
-    
-    session_id = user_info.get("session_id")
-    if not session_id:
-        raise CustomException(msg="认证已失效", code=10401, status_code=401)
 
-    # 检查用户是否在线
-    online_ok = await RedisCURD(redis).exists(key=f'{RedisInitKeyConfig.ACCESS_TOKEN.key}:{session_id}')
-    if not online_ok:
-        raise CustomException(msg="认证已失效", code=10401, status_code=401)
-
-    # 关闭数据权限过滤，避免当前用户查询被拦截
-    auth = AuthSchema(db=db, check_data_scope=False)
-    username = user_info.get("user_name")
-    if not username:
-        raise CustomException(msg="认证已失效", code=10401, status_code=401)
-    # 获取用户信息，使用深层预加载确保RoleModel.creator被正确加载
-    user = await UserCRUD(auth).get_by_username_crud(
-        username=username, 
-        preload=[
-            "dept", 
-            selectinload(UserModel.roles).selectinload(RoleModel.creator),
-            "positions", 
-            "creator"
-        ]
-    )
-    if not user:
-        raise CustomException(msg="用户不存在", code=10401, status_code=401)
-    if not user.status:
-        raise CustomException(msg="用户已被停用", code=10401, status_code=401)
-    
-    # 设置请求上下文
-    request.scope["user_id"] = user.id
-    request.scope["user_username"] = user.username
-    
-    # 过滤可用的角色和职位
-    if hasattr(user, 'roles'):
-        user.roles = [role for role in user.roles if role and role.status]
-    if hasattr(user, 'positions'):
-        user.positions = [pos for pos in user.positions if pos and pos.status]
-
-    auth.user = UserOutSchema.model_validate(user)
-    return auth
+async def get_current_user_by_query(
+    request: Request,
+    token: str = Query(..., description="访问token", alias="token"),
+    db: AsyncSession = Depends(db_getter),
+    redis: Redis = Depends(redis_getter),
+) -> AuthSchema:
+    """基于查询参数token获取当前用户（适用于SSE等场景）"""
+    return await _build_auth_schema(request=request, token=token, db=db, redis=redis)
 
 
 class AuthPermission:

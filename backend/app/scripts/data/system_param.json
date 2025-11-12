@@ -142,5 +142,14 @@
     "status": true,
     "description": "访问IP黑名单",
     "creator_id": 1
+  },
+  {
+    "config_name": "任务日志保留天数",
+    "config_key": "operations_task_log_keep_days",
+    "config_value": "7",
+    "config_type": false,
+    "status": true,
+    "description": "运维任务日志保留天数配置",
+    "creator_id": 1
   }
 ]
