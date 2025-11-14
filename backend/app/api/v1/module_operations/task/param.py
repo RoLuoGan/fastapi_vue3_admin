@@ -19,6 +19,9 @@ class TaskQueryParam:
         service_id: Optional[int] = Query(None, description="服务模块ID"),
         node_id: Optional[int] = Query(None, description="节点ID"),
         ip: Optional[str] = Query(None, description="IP地址"),
+        project: Optional[str] = Query(None, description="运维管理项目"),
+        idc: Optional[str] = Query(None, description="机房"),
+        module_group: Optional[str] = Query(None, description="模块分组"),
         start_time: Optional[DateTimeStr] = Query(None, description="开始时间", example="2025-01-01 00:00:00"),
         end_time: Optional[DateTimeStr] = Query(None, description="结束时间", example="2025-12-31 23:59:59"),
     ) -> None:
@@ -28,6 +31,9 @@ class TaskQueryParam:
         self.service_id = service_id
         self.node_id = node_id
         self.ip = ("like", ip)
+        self.project = project
+        self.idc = idc
+        self.module_group = module_group
 
         if start_time and end_time:
             self.created_at = ("between", (start_time, end_time))

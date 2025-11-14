@@ -3,7 +3,7 @@
 服务器（节点）领域 Schema 定义
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -12,11 +12,15 @@ from app.core.base_schema import BaseSchema
 
 class ServerCreateSchema(BaseModel):
     """服务器节点创建模型"""
-    service_id: int = Field(..., ge=1, description="服务模块ID")
+    service_id: Optional[int] = Field(default=None, ge=1, description="服务模块ID")
     ip: str = Field(..., max_length=50, description="节点IP地址")
     port: Optional[int] = Field(default=22, ge=1, le=65535, description="端口号")
     status: bool = Field(default=True, description="是否启用(True:启用 False:停用)")
     description: Optional[str] = Field(default=None, max_length=255, description="备注说明")
+    project: Optional[str] = Field(default=None, max_length=50, description="运维管理项目")
+    idc: Optional[str] = Field(default=None, max_length=50, description="机房")
+    tags: Optional[str] = Field(default=None, max_length=100, description="服务器标签")
+    service_ids: Optional[List[int]] = Field(default=None, description="关联的服务模块ID列表（仅用于更新关联关系）")
 
     @field_validator("ip")
     @classmethod
@@ -58,6 +62,9 @@ class ServerOutSchema(ServerCreateSchema, BaseSchema):
                 "port",
                 "status",
                 "description",
+                "project",
+                "idc",
+                "tags",
                 "created_at",
                 "updated_at",
                 "service",

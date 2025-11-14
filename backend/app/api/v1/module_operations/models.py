@@ -22,6 +22,8 @@ class ServiceModel(CreatorMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, comment="服务模块名称")
     code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, unique=True, comment="服务模块编码")
     status: Mapped[bool] = mapped_column(Boolean(), default=True, nullable=False, comment="是否启用(True:启用 False:禁用)")
+    project: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="运维管理项目")
+    module_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="模块分组")
     
     # 关联关系
     nodes: Mapped[List["NodeModel"]] = relationship(back_populates="service", lazy="selectin", cascade="all, delete-orphan")
@@ -36,13 +38,16 @@ class NodeModel(CreatorMixin):
     __loader_options__ = ["creator", "service"]
 
     # 基础字段
-    service_id: Mapped[int] = mapped_column(Integer, ForeignKey("operations_service.id", ondelete="CASCADE", onupdate="CASCADE"), nullable=False, index=True, comment="服务模块ID")
+    service_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("operations_service.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, index=True, comment="服务模块ID")
     ip: Mapped[str] = mapped_column(String(50), nullable=False, comment="节点IP地址")
     port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=22, comment="端口号")
     status: Mapped[bool] = mapped_column(Boolean(), default=True, nullable=False, comment="是否启用(True:启用 False:禁用)")
+    project: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="运维管理项目")
+    idc: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="机房")
+    tags: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="服务器标签")
     
     # 关联关系
-    service: Mapped["ServiceModel"] = relationship(back_populates="nodes", lazy="selectin")
+    service: Mapped[Optional["ServiceModel"]] = relationship(back_populates="nodes", lazy="selectin")
 
 
 class TaskModel(CreatorMixin):
@@ -63,6 +68,9 @@ class TaskModel(CreatorMixin):
     log_path: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="任务日志文件路径")
     params: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="构建参数JSON")
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="错误信息")
+    project: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="运维管理项目")
+    idc: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="机房")
+    module_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="模块分组")
 
     # 关联关系
     node: Mapped[Optional["NodeModel"]] = relationship(lazy="selectin")

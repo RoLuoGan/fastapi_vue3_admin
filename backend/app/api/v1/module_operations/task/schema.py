@@ -30,6 +30,9 @@ class TaskOutSchema(BaseSchema):
     log_path: Optional[str] = Field(default=None, description="任务日志路径")
     params: Optional[Dict[str, Any]] = Field(default=None, description="任务参数")
     error_message: Optional[str] = Field(default=None, description="错误信息")
+    project: Optional[str] = Field(default=None, description="运维管理项目")
+    idc: Optional[str] = Field(default=None, description="机房")
+    module_group: Optional[str] = Field(default=None, description="模块分组")
 
     @model_validator(mode="before")
     @classmethod
@@ -49,6 +52,9 @@ class TaskOutSchema(BaseSchema):
                 "log_path",
                 "params",
                 "error_message",
+                "project",
+                "idc",
+                "module_group",
                 "created_at",
                 "updated_at",
                 "service",

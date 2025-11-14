@@ -15,16 +15,6 @@
         </div>
       </template>
       <el-form ref="queryFormRef" :model="queryFormData" inline label-width="90px" label-suffix=":">
-        <el-form-item label="所属服务">
-          <el-select v-model="queryFormData.service_id" placeholder="全部" clearable style="width: 200px">
-            <el-option
-              v-for="item in serviceOptions"
-              :key="item.id"
-              :label="item.name"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
         <el-form-item label="节点IP">
           <el-input v-model="queryFormData.ip" placeholder="请输入节点IP" clearable />
         </el-form-item>
@@ -33,6 +23,19 @@
             <el-option :value="true" label="启用" />
             <el-option :value="false" label="停用" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="运维管理项目">
+          <el-select v-model="queryFormData.project" placeholder="全部" clearable style="width: 200px">
+            <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="机房">
+          <el-select v-model="queryFormData.idc" placeholder="全部" clearable style="width: 200px">
+            <el-option v-for="item in idcOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="服务器标签">
+          <el-input v-model="queryFormData.tags" placeholder="请输入服务器标签" clearable />
         </el-form-item>
       </el-form>
     </el-card>
@@ -74,7 +77,6 @@
       >
         <el-table-column type="selection" width="55" align="center" />
         <el-table-column type="index" width="60" label="#" />
-        <el-table-column prop="service_name" label="所属服务" min-width="160" />
         <el-table-column prop="ip" label="节点IP" min-width="160" />
         <el-table-column prop="port" label="端口" width="90" />
         <el-table-column prop="status" label="状态" width="100">
@@ -84,6 +86,9 @@
             </el-tag>
           </template>
         </el-table-column>
+        <el-table-column prop="project" label="运维管理项目" min-width="140" />
+        <el-table-column prop="idc" label="机房" min-width="120" />
+        <el-table-column prop="tags" label="服务器标签" min-width="140" />
         <el-table-column prop="description" label="描述" min-width="200" show-overflow-tooltip />
         <el-table-column prop="created_at" label="创建时间" min-width="180" />
         <el-table-column fixed="right" label="操作" width="220" align="center">
@@ -145,9 +150,6 @@
     >
       <template v-if="dialog.type === 'detail'">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="所属服务" :span="2">
-            {{ nodeDetail?.service_name || "-" }}
-          </el-descriptions-item>
           <el-descriptions-item label="节点IP">
             {{ nodeDetail?.ip || "-" }}
           </el-descriptions-item>
@@ -159,31 +161,36 @@
               {{ nodeDetail?.status ? "启用" : "停用" }}
             </el-tag>
           </el-descriptions-item>
+          <el-descriptions-item label="运维管理项目">
+            {{ nodeDetail?.project || "-" }}
+          </el-descriptions-item>
+          <el-descriptions-item label="机房">
+            {{ nodeDetail?.idc || "-" }}
+          </el-descriptions-item>
+          <el-descriptions-item label="服务器标签">
+            {{ nodeDetail?.tags || "-" }}
+          </el-descriptions-item>
           <el-descriptions-item label="创建时间">
             {{ nodeDetail?.created_at || "-" }}
           </el-descriptions-item>
           <el-descriptions-item label="描述" :span="2">
             {{ nodeDetail?.description || "-" }}
           </el-descriptions-item>
+          <el-descriptions-item label="关联服务模块" :span="2">
+            <el-tag v-for="service in nodeDetail?.services || []" :key="service.id" class="mr-2">
+              {{ service.name }}
+            </el-tag>
+            <span v-if="!nodeDetail?.services || nodeDetail.services.length === 0">-</span>
+          </el-descriptions-item>
         </el-descriptions>
       </template>
       <div v-else>
         <el-form ref="nodeFormRef" :model="nodeForm" :rules="nodeRules" label-width="100px" label-suffix=":">
-          <el-form-item label="所属服务" prop="service_id">
-            <el-select v-model="nodeForm.service_id" placeholder="请选择所属服务" clearable>
-              <el-option
-                v-for="item in serviceOptions"
-                :key="item.id"
-                :label="item.name"
-                :value="item.id"
-              />
-            </el-select>
-          </el-form-item>
           <el-form-item label="节点IP" prop="ip">
             <el-input v-model="nodeForm.ip" placeholder="请输入节点IP" />
           </el-form-item>
           <el-form-item label="端口" prop="port">
-            <el-input-number v-model="nodeForm.port" :min="1" :max="65535" controls-position="right" />
+            <el-input-number v-model="nodeForm.port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
           </el-form-item>
           <el-form-item label="状态" prop="status">
             <el-switch
@@ -195,6 +202,21 @@
               :inactive-value="false"
             />
           </el-form-item>
+          <el-form-item label="运维管理项目" prop="project">
+            <el-select v-model="nodeForm.project" placeholder="请选择运维管理项目" clearable style="width: 100%">
+              <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="机房" prop="idc">
+            <el-select v-model="nodeForm.idc" placeholder="请选择机房" clearable style="width: 100%">
+              <el-option v-for="item in idcOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="服务器标签" prop="tags">
+            <el-select v-model="nodeForm.tags" placeholder="请选择服务器标签" clearable style="width: 100%">
+              <el-option v-for="item in tagsOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="描述" prop="description">
             <el-input
               v-model="nodeForm.description"
@@ -204,6 +226,11 @@
               :maxlength="255"
               show-word-limit
             />
+          </el-form-item>
+          <el-form-item label="关联服务模块" prop="service_id">
+            <el-select v-model="nodeForm.service_id" placeholder="请选择关联的服务模块" clearable style="width: 100%">
+              <el-option v-for="service in serviceOptions" :key="service.id" :label="service.name" :value="service.id" />
+            </el-select>
           </el-form-item>
         </el-form>
       </div>
@@ -233,6 +260,7 @@ import NodeAPI, {
   type NodeTable,
   type ServiceTable,
 } from "@/api/operations/node";
+import DictAPI from "@/api/system/dict";
 
 type DialogType = "create" | "update" | "detail";
 
@@ -248,14 +276,19 @@ const total = ref(0);
 const selectionIds = ref<number[]>([]);
 
 const serviceOptions = ref<ServiceOption[]>([]);
+const projectOptions = ref<any[]>([]);
+const idcOptions = ref<any[]>([]);
+const tagsOptions = ref<any[]>([]);
 
 const queryFormRef = ref<FormInstance>();
 const queryFormData = reactive<NodePageQuery>({
   page_no: 1,
   page_size: 10,
-  service_id: undefined,
   ip: "",
   status: undefined,
+  project: undefined,
+  idc: undefined,
+  tags: undefined,
 });
 
 const dialog = reactive({
@@ -272,12 +305,14 @@ const nodeForm = reactive<NodeForm>({
   port: 22,
   status: true,
   description: "",
+  project: undefined,
+  idc: undefined,
+  tags: undefined,
 });
 
 const nodeDetail = ref<NodeTable>();
 
 const nodeRules: FormRules<NodeForm> = {
-  service_id: [{ required: true, message: "请选择所属服务", trigger: "change" }],
   ip: [
     { required: true, message: "请输入节点IP地址", trigger: "blur" },
     { pattern: /^(\d{1,3}\.){3}\d{1,3}$/, message: "IP地址格式不正确", trigger: "blur" },
@@ -293,6 +328,21 @@ async function loadServiceOptions() {
       id: item.id!,
       name: item.name || "-",
     }));
+  } catch (error: any) {
+    console.error(error);
+  }
+}
+
+async function loadDictOptions() {
+  try {
+    const [projectRes, idcRes, tagsRes] = await Promise.all([
+      DictAPI.getInitDict("operations_project"),
+      DictAPI.getInitDict("operations_idc"),
+      DictAPI.getInitDict("operations_server_tags"),
+    ]);
+    projectOptions.value = projectRes.data.data || [];
+    idcOptions.value = idcRes.data.data || [];
+    tagsOptions.value = tagsRes.data.data || [];
   } catch (error: any) {
     console.error(error);
   }
@@ -345,6 +395,9 @@ function resetForm() {
   nodeForm.port = 22;
   nodeForm.status = true;
   nodeForm.description = "";
+  nodeForm.project = undefined;
+  nodeForm.idc = undefined;
+  nodeForm.tags = undefined;
 }
 
 async function handleOpenDialog(type: DialogType, id?: number) {
@@ -377,6 +430,11 @@ async function handleOpenDialog(type: DialogType, id?: number) {
       nodeForm.port = detail.port || 22;
       nodeForm.status = detail.status ?? true;
       nodeForm.description = detail.description || "";
+      nodeForm.project = detail.project;
+      nodeForm.idc = detail.idc;
+      nodeForm.tags = detail.tags;
+      // 设置关联的服务模块ID
+      nodeForm.service_id = detail.service_id;
     }
   } catch (error: any) {
     console.error(error);
@@ -433,6 +491,7 @@ async function handleDelete(ids: number[]) {
 }
 
 onMounted(() => {
+  loadDictOptions();
   Promise.all([loadServiceOptions(), loadData()]);
 });
 </script>

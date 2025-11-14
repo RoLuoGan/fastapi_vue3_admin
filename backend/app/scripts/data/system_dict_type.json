@@ -68,5 +68,33 @@
     "status": true,
     "description": "表格回显样式列表",
     "creator_id": 1
+  },
+  {
+    "dict_name": "运维管理项目",
+    "dict_type": "operations_project",
+    "status": true,
+    "description": "运维管理项目列表",
+    "creator_id": 1
+  },
+  {
+    "dict_name": "运维模块分组",
+    "dict_type": "operations_module_group",
+    "status": true,
+    "description": "运维模块分组列表",
+    "creator_id": 1
+  },
+  {
+    "dict_name": "运维服务器标签",
+    "dict_type": "operations_server_tags",
+    "status": true,
+    "description": "运维服务器标签列表",
+    "creator_id": 1
+  },
+  {
+    "dict_name": "机房",
+    "dict_type": "operations_idc",
+    "status": true,
+    "description": "机房列表",
+    "creator_id": 1
   }
 ]

@@ -16,6 +16,16 @@
                 <el-option value="false" label="停用" />
               </el-select>
             </el-form-item>
+            <el-form-item prop="project" label="运维管理项目">
+              <el-select v-model="queryFormData.project" placeholder="请选择运维管理项目" style="width: 167.5px" clearable>
+                <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item prop="module_group" label="模块分组">
+              <el-select v-model="queryFormData.module_group" placeholder="请选择模块分组" style="width: 167.5px" clearable>
+                <el-option v-for="item in moduleGroupOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+              </el-select>
+            </el-form-item>
             <el-form-item class="search-buttons">
               <el-button v-hasPerm="['operations:node:query']" type="primary" icon="search" native-type="submit">查询</el-button>
               <el-button v-hasPerm="['operations:node:query']" icon="refresh" @click="handleResetQuery">重置</el-button>
@@ -276,6 +286,8 @@ defineOptions({
 import NodeAPI, { ServiceTable, NodeTable, TaskTable, ServiceForm, NodeForm, ServiceQueryParam } from "@/api/operations/node";
 import { useRouter } from "vue-router";
 import { QuestionFilled, CircleCheck, CircleClose, Loading } from "@element-plus/icons-vue";
+import DictAPI from "@/api/system/dict";
+import { onBeforeUnmount } from "vue";
 
 const queryFormRef = ref();
 const serviceFormRef = ref();
@@ -293,6 +305,8 @@ const pageTableData = ref<ServiceTable[]>([]);
 const queryFormData = reactive<ServiceQueryParam>({
   name: undefined,
   status: undefined,
+  project: undefined,
+  module_group: undefined,
 });
 
 // 服务模块表单
@@ -339,6 +353,10 @@ const serviceOptions = ref<ServiceTable[]>([]);
 const taskList = ref<TaskTable[]>([]);
 const router = useRouter();
 
+// 字典选项
+const projectOptions = ref<any[]>([]);
+const moduleGroupOptions = ref<any[]>([]);
+
 // 表单验证规则
 const serviceRules = reactive({
   name: [{ required: true, message: "请输入服务名称", trigger: "blur" }],
@@ -353,7 +371,7 @@ const nodeRules = reactive({
 });
 
 // 选择行（单行选择）
-function handleSelect(selection: any[], row: any) {
+async function handleSelect(selection: any[], row: any) {
   if (row.nodes) {
     // 如果选择的是服务模块，选中该模块下的所有节点
     const isSelected = selection.some((item: any) => item.id === row.id);
@@ -369,10 +387,11 @@ function handleSelect(selection: any[], row: any) {
       });
     }
   }
+  await updateSelectionState();
 }
 
 // 全选
-function handleSelectAll(selection: any[]) {
+async function handleSelectAll(selection: any[]) {
   // 如果是全选，需要展开所有节点
   if (selection.length > 0) {
     // 遍历所有服务模块，选中其下的所有节点
@@ -384,13 +403,32 @@ function handleSelectAll(selection: any[]) {
       }
     });
   }
+  await updateSelectionState();
 }
 
 // 行选中变化（保留此函数用于其他可能的监听）
-function handleSelectionChange(selection: any[]) {
+function handleSelectionChange() {
+  updateSelectionState();
+}
+
+async function updateSelectionState() {
+  await nextTick();
+  const selection =
+    (typeof dataTableRef.value?.getSelectionRows === "function" && dataTableRef.value.getSelectionRows()) || [];
   selectIds.value = selection.map((item: any) => item.id);
-  // 只收集节点ID
-  selectNodeIds.value = selection.filter((item: any) => !item.nodes).map((item: any) => item.id);
+  const nodeIdSet = new Set<number>();
+  selection.forEach((item: any) => {
+    if (item?.nodes && Array.isArray(item.nodes)) {
+      item.nodes.forEach((node: any) => {
+        if (node?.id) {
+          nodeIdSet.add(node.id);
+        }
+      });
+    } else if (!item?.nodes && item?.id) {
+      nodeIdSet.add(item.id);
+    }
+  });
+  selectNodeIds.value = Array.from(nodeIdSet);
 }
 
 // 加载服务树数据
@@ -398,7 +436,15 @@ async function loadingData() {
   loading.value = true;
   try {
     const response = await NodeAPI.getServiceTree(queryFormData);
-    pageTableData.value = response.data.data || [];
+    // 展示所有服务模块，但只显示有service_id的节点（过滤掉没有关联服务模块的节点）
+    const processedData = (response.data.data || []).map((service: any) => {
+      // 过滤掉没有service_id的节点（这些节点不应该单独显示）
+      if (service.nodes) {
+        service.nodes = service.nodes.filter((node: any) => node.service_id);
+      }
+      return service;
+    });
+    pageTableData.value = processedData;
     // 同时加载服务选项
     await loadServiceOptions();
   } catch (error: any) {
@@ -418,11 +464,50 @@ async function loadServiceOptions() {
   }
 }
 
+// 加载字典选项
+async function loadDictOptions() {
+  try {
+    const [projectRes, moduleGroupRes] = await Promise.all([
+      DictAPI.getInitDict("operations_project"),
+      DictAPI.getInitDict("operations_module_group"),
+    ]);
+    projectOptions.value = projectRes.data.data || [];
+    moduleGroupOptions.value = moduleGroupRes.data.data || [];
+  } catch (error: any) {
+    console.error(error);
+  }
+}
+
+// 定时器ID
+let recentTasksTimer: number | null = null;
+
+/**
+ * 停止定时刷新任务列表
+ */
+function stopRecentTasksRefresh() {
+  if (recentTasksTimer !== null) {
+    clearInterval(recentTasksTimer);
+    recentTasksTimer = null;
+  }
+}
+
+/**
+ * 检查是否有正在运行的任务
+ */
+function hasRunningTasks(): boolean {
+  return taskList.value.some(task => task.task_status === "running");
+}
+
 // 加载最近任务
 async function loadRecentTasks() {
   try {
     const response = await NodeAPI.getRecentTasks(20);
     taskList.value = response.data.data || [];
+    
+    // 检查是否有正在运行的任务，如果没有则停止定时刷新
+    if (!hasRunningTasks()) {
+      stopRecentTasksRefresh();
+    }
   } catch (error: any) {
     console.error(error);
   }
@@ -615,11 +700,17 @@ async function handleDeploy() {
     try {
       loading.value = true;
       await NodeAPI.deploy(selectNodeIds.value);
-      ElMessage.success("部署任务已启动");
+      // 响应拦截器已经自动显示成功消息，这里不需要重复显示
       handleRefresh();
-      // 刷新任务列表
-      setTimeout(() => {
-        loadRecentTasks();
+      // 刷新任务列表，并启动定时刷新（如果有运行中的任务）
+      setTimeout(async () => {
+        await loadRecentTasks();
+        // 如果有正在运行的任务，启动定时刷新
+        if (hasRunningTasks() && recentTasksTimer === null) {
+          recentTasksTimer = window.setInterval(() => {
+            loadRecentTasks();
+          }, 5000);
+        }
       }, 2000);
     } catch (error: any) {
       console.error(error);
@@ -645,11 +736,17 @@ async function handleRestart() {
     try {
       loading.value = true;
       await NodeAPI.restart(selectNodeIds.value);
-      ElMessage.success("重启任务已启动");
+      // 响应拦截器已经自动显示成功消息，这里不需要重复显示
       handleRefresh();
-      // 刷新任务列表
-      setTimeout(() => {
-        loadRecentTasks();
+      // 刷新任务列表，并启动定时刷新（如果有运行中的任务）
+      setTimeout(async () => {
+        await loadRecentTasks();
+        // 如果有正在运行的任务，启动定时刷新
+        if (hasRunningTasks() && recentTasksTimer === null) {
+          recentTasksTimer = window.setInterval(() => {
+            loadRecentTasks();
+          }, 5000);
+        }
       }, 2000);
     } catch (error: any) {
       console.error(error);
@@ -685,12 +782,20 @@ function handleOpenTaskDetailFromList(taskId?: number) {
 }
 
 onMounted(() => {
+  loadDictOptions();
   loadingData();
   loadRecentTasks();
-  // 定时刷新任务列表
-  setInterval(() => {
-    loadRecentTasks();
-  }, 5000);
+  // 如果有正在运行的任务，启动定时刷新
+  if (hasRunningTasks()) {
+    recentTasksTimer = window.setInterval(() => {
+      loadRecentTasks();
+    }, 5000);
+  }
+});
+
+onBeforeUnmount(() => {
+  // 清除定时器，防止页面关闭后继续请求
+  stopRecentTasksRefresh();
 });
 </script>
 

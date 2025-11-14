@@ -11,6 +11,7 @@ from app.api.v1.module_system.auth.schema import AuthSchema
 from .crud import ServiceCRUD
 from .schema import ServiceCreateSchema, ServiceUpdateSchema, ServiceOutSchema
 from ..server.schema import ServerOutSchema
+from ..server.crud import ServerCRUD
 
 
 class ServiceService:
@@ -28,9 +29,11 @@ class ServiceService:
         result: List[Dict] = []
         for service in service_list:
             service_dict = ServiceOutSchema.model_validate(service).model_dump()
+            # 只返回有service_id的节点（过滤掉没有关联服务模块的节点）
             nodes = [
                 ServerOutSchema.model_validate(node).model_dump()
                 for node in service.nodes
+                if node.service_id == service.id
             ]
             service_dict["nodes"] = nodes
             result.append(service_dict)
@@ -42,9 +45,11 @@ class ServiceService:
         if not service:
             raise CustomException(msg="服务模块不存在")
         service_dict = ServiceOutSchema.model_validate(service).model_dump()
+        # 只返回有service_id的节点（过滤掉没有关联服务模块的节点）
         service_dict["nodes"] = [
             ServerOutSchema.model_validate(node).model_dump()
             for node in service.nodes
+            if node.service_id == service.id
         ]
         return service_dict
 
@@ -76,7 +81,21 @@ class ServiceService:
         exist = await ServiceCRUD(auth).get(name=data.name)
         if exist:
             raise CustomException(msg="创建失败，该服务模块已存在")
-        service = await ServiceCRUD(auth).create(data=data)
+        
+        # 提取节点ID列表
+        node_ids = getattr(data, 'node_ids', None)
+        data_dict = data.model_dump(exclude={'node_ids'})
+        
+        service = await ServiceCRUD(auth).create(data=data_dict)
+        
+        # 更新关联节点的service_id
+        if node_ids:
+            from ..server.crud import ServerCRUD
+            for node_id in node_ids:
+                node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
+                if node:
+                    await ServerCRUD(auth).update(id=node_id, data={"service_id": service.id})
+        
         return ServiceOutSchema.model_validate(service).model_dump()
 
     @classmethod
@@ -87,7 +106,28 @@ class ServiceService:
         exist_service = await ServiceCRUD(auth).get(name=data.name)
         if exist_service and exist_service.id != id:
             raise CustomException(msg="更新失败，服务模块名称重复")
-        updated = await ServiceCRUD(auth).update(id=id, data=data)
+        
+        # 提取节点ID列表
+        node_ids = getattr(data, 'node_ids', None)
+        data_dict = data.model_dump(exclude={'node_ids'})
+        
+        updated = await ServiceCRUD(auth).update(id=id, data=data_dict)
+        
+        # 更新关联节点的service_id
+        if node_ids is not None:
+            from ..server.crud import ServerCRUD
+            # 先清除该服务模块下所有节点的关联
+            existing_nodes = await ServerCRUD(auth).get_list_crud(search={"service_id": id})
+            for node in existing_nodes:
+                if node.id not in node_ids:
+                    await ServerCRUD(auth).update(id=node.id, data={"service_id": None})
+            
+            # 更新新关联节点的service_id
+            for node_id in node_ids:
+                node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
+                if node:
+                    await ServerCRUD(auth).update(id=node_id, data={"service_id": id})
+        
         return ServiceOutSchema.model_validate(updated).model_dump()
 
     @classmethod

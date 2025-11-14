@@ -42,6 +42,21 @@
         <el-form-item label="节点IP">
           <el-input v-model="queryFormData.ip" placeholder="请输入节点IP" clearable />
         </el-form-item>
+        <el-form-item label="运维管理项目">
+          <el-select v-model="queryFormData.project" placeholder="全部" clearable style="width: 200px">
+            <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="机房">
+          <el-select v-model="queryFormData.idc" placeholder="全部" clearable style="width: 200px">
+            <el-option v-for="item in idcOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="模块分组">
+          <el-select v-model="queryFormData.module_group" placeholder="全部" clearable style="width: 200px">
+            <el-option v-for="item in moduleGroupOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="时间范围">
           <el-date-picker
             v-model="createdRange"
@@ -114,7 +129,7 @@
         <el-table-column prop="error_message" label="错误信息" min-width="200" show-overflow-tooltip />
         <el-table-column prop="created_at" label="创建时间" min-width="180" />
         <el-table-column prop="updated_at" label="更新时间" min-width="180" />
-        <el-table-column fixed="right" label="操作" width="220" align="center">
+        <el-table-column fixed="right" label="操作" width="150" align="center">
           <template #default="{ row }">
             <el-button
               type="primary"
@@ -124,17 +139,7 @@
               @click="handleViewDetail(row.id!)"
               v-hasPerm="['operations:task:query']"
             >
-              查看详情
-            </el-button>
-            <el-button
-              type="info"
-              link
-              icon="document"
-              size="small"
-              @click="handleViewDetail(row.id!)"
-              v-hasPerm="['operations:task:log']"
-            >
-              控制台输出
+              任务详情
             </el-button>
             <el-button
               type="danger"
@@ -177,6 +182,7 @@ import NodeAPI, {
   type TaskTable,
   type ServiceTable,
 } from "@/api/operations/node";
+import DictAPI from "@/api/system/dict";
 
 interface ServiceOption {
   id: number;
@@ -203,9 +209,16 @@ const queryFormData = reactive<TaskPageQuery>({
   task_status: undefined,
   service_id: undefined,
   ip: "",
+  project: undefined,
+  idc: undefined,
+  module_group: undefined,
   start_time: undefined,
   end_time: undefined,
 });
+
+const projectOptions = ref<any[]>([]);
+const idcOptions = ref<any[]>([]);
+const moduleGroupOptions = ref<any[]>([]);
 
 function handleDateChange(value: [string, string] | null) {
   if (value && value.length === 2) {
@@ -225,6 +238,21 @@ async function loadServiceOptions() {
       id: item.id!,
       name: item.name || "-",
     }));
+  } catch (error: any) {
+    console.error(error);
+  }
+}
+
+async function loadDictOptions() {
+  try {
+    const [projectRes, idcRes, moduleGroupRes] = await Promise.all([
+      DictAPI.getInitDict("operations_project"),
+      DictAPI.getInitDict("operations_idc"),
+      DictAPI.getInitDict("operations_module_group"),
+    ]);
+    projectOptions.value = projectRes.data.data || [];
+    idcOptions.value = idcRes.data.data || [];
+    moduleGroupOptions.value = moduleGroupRes.data.data || [];
   } catch (error: any) {
     console.error(error);
   }
@@ -345,6 +373,7 @@ async function handleDelete(ids: number[]) {
 }
 
 onMounted(() => {
+  loadDictOptions();
   Promise.all([loadServiceOptions(), loadData()]);
 });
 </script>

@@ -97,8 +97,14 @@
         </div>
       </template>
       <div ref="logContainerRef" class="log-container">
-        <p v-for="(line, index) in logLines" :key="index" class="log-line">
-          {{ line }}
+        <p
+          v-for="entry in logLines"
+          :key="entry.id"
+          class="log-line"
+          :class="`log-line--${entry.type}`"
+        >
+          <span class="log-timestamp">[{{ entry.timestamp }}]</span>
+          <span class="log-message">{{ entry.message }}</span>
         </p>
         <p v-if="logLines.length === 0" class="log-empty">
           暂无日志输出，等待任务写入日志…
@@ -115,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import NodeAPI, { type TaskDetail } from "@/api/operations/node";
@@ -125,11 +131,20 @@ const route = useRoute();
 const router = useRouter();
 const loading = ref(false);
 const taskDetail = ref<TaskDetail>();
-const logLines = ref<string[]>([]);
+
+interface LogEntry {
+  id: string;
+  timestamp: string;
+  message: string;
+  type: "log" | "info" | "error" | "end" | "system";
+}
+
+const logLines = ref<LogEntry[]>([]);
 const streamStatusLabel = ref("未连接");
 const eventSource = ref<EventSource | null>(null);
 const paramDrawerVisible = ref(false);
 const logContainerRef = ref<HTMLElement>();
+const isTaskFinished = ref(false);
 
 const taskId = computed<number>(() => {
   const paramId = route.params.id;
@@ -144,6 +159,8 @@ const prettyParams = computed(() => {
   if (!taskDetail.value?.params) return "暂无参数";
   return JSON.stringify(taskDetail.value.params, null, 2);
 });
+
+// ==================== 工具函数 ====================
 
 function taskTypeLabel(type?: string) {
   if (type === "deploy") return "部署";
@@ -196,21 +213,39 @@ function formatSize(size?: number) {
   return `${(size / (1024 * 1024)).toFixed(2)} MB`;
 }
 
-async function fetchTaskDetail() {
-  if (!taskId.value) return;
-  loading.value = true;
-  try {
-    const response = await NodeAPI.getTaskDetail(taskId.value);
-    taskDetail.value = response.data.data;
-  } catch (error: any) {
-    console.error(error);
-  } finally {
-    loading.value = false;
-  }
+function pad(value: number): string {
+  return value.toString().padStart(2, "0");
 }
 
-function appendLog(line: string) {
-  logLines.value.push(line);
+function nowTimestamp(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(
+    now.getMinutes()
+  )}:${pad(now.getSeconds())}`;
+}
+
+function normalizeTimestamp(raw?: string): string {
+  if (!raw) return nowTimestamp();
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(
+      parsed.getHours()
+    )}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`;
+  }
+  return raw;
+}
+
+// ==================== 日志管理 ====================
+
+function appendLogEntry(entry: LogEntry) {
+  // 去重：非system类型的事件使用id去重
+  if (entry.type !== "system" && entry.id) {
+    const exists = logLines.value.some((item) => item.id === entry.id);
+    if (exists) {
+      return;
+    }
+  }
+  logLines.value.push(entry);
   nextTick(() => {
     if (logContainerRef.value) {
       logContainerRef.value.scrollTop = logContainerRef.value.scrollHeight;
@@ -218,47 +253,292 @@ function appendLog(line: string) {
   });
 }
 
+function appendSystemLog(message: string, type: LogEntry["type"] = "system") {
+  appendLogEntry({
+    id: `${type}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    timestamp: nowTimestamp(),
+    message,
+    type,
+  });
+}
+
+// ==================== SSE事件处理 ====================
+
+/**
+ * 统一处理SSE事件
+ * 解析标准化的SSE事件格式: { type, payload, timestamp, requestId }
+ */
+function handleSSEEvent(event: MessageEvent, defaultType: LogEntry["type"] = "log"): void {
+  const rawData = event.data;
+  
+  if (!rawData || (typeof rawData === "string" && rawData.trim().length === 0)) {
+    return;
+  }
+  
+  let data: any;
+  try {
+    data = JSON.parse(rawData);
+  } catch (error) {
+    // 兼容旧格式：纯文本处理
+    const entryId = event.lastEventId || `${defaultType}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    appendLogEntry({
+      id: entryId,
+      timestamp: nowTimestamp(),
+      message: String(rawData).trim(),
+      type: defaultType,
+    });
+    return;
+  }
+
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return;
+  }
+
+  const eventType = data.type;
+  const payload = data.payload || {};
+  const timestampRaw = data.timestamp;
+
+  // 处理任务状态更新事件
+  if (eventType === "task_status") {
+    if (taskDetail.value && payload) {
+      if (payload.taskStatus) {
+        taskDetail.value.task_status = payload.taskStatus;
+        // 如果任务已结束，关闭SSE连接并停止定时刷新
+        if (["success", "failed"].includes(payload.taskStatus)) {
+          stopLogStream();
+          stopTaskDetailRefresh();
+          streamStatusLabel.value = "任务已结束";
+          isTaskFinished.value = true;
+        } else if (payload.taskStatus !== "running") {
+          stopTaskDetailRefresh();
+        }
+      }
+      if (payload.progress !== undefined) {
+        taskDetail.value.progress = payload.progress;
+      }
+      if (payload.errorMessage !== undefined) {
+        taskDetail.value.error_message = payload.errorMessage;
+      }
+      if (timestampRaw && typeof timestampRaw === "number") {
+        const date = new Date(timestampRaw * 1000);
+        taskDetail.value.updated_at = date.toISOString().replace("T", " ").substring(0, 19);
+      }
+    }
+    return;
+  }
+
+  // 处理日志类事件（task_log, task_info, task_error, task_end）
+  const message = payload.content || payload.message || payload.data || "";
+  if (!message || (typeof message === "string" && message.trim().length === 0)) {
+    return;
+  }
+
+  const entryId =
+    (event.lastEventId && `${event.lastEventId}`.length > 0
+      ? `${event.lastEventId}`
+      : `${eventType}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`);
+
+  let timestamp: string;
+  if (timestampRaw && typeof timestampRaw === "number") {
+    const date = new Date(timestampRaw * 1000);
+    timestamp = normalizeTimestamp(date.toISOString());
+  } else {
+    timestamp = normalizeTimestamp(timestampRaw);
+  }
+
+  // 映射事件类型到前端日志类型
+  let logType: LogEntry["type"] = defaultType;
+  if (eventType === "task_log") {
+    logType = "log";
+  } else if (eventType === "task_info") {
+    logType = "info";
+  } else if (eventType === "task_error") {
+    logType = "error";
+  } else if (eventType === "task_end") {
+    logType = "end";
+  }
+
+  // 如果是结束事件，设置标志并关闭连接
+  if (eventType === "task_end") {
+    isTaskFinished.value = true;
+    streamStatusLabel.value = "已结束";
+    stopLogStream();
+    stopTaskDetailRefresh();
+  }
+
+  appendLogEntry({
+    id: entryId,
+    timestamp,
+    message: String(message).trim(),
+    type: logType,
+  });
+}
+
+// ==================== SSE连接管理 ====================
+
 function startLogStream() {
   stopLogStream();
+  
   if (!taskId.value) {
     streamStatusLabel.value = "未连接";
     return;
   }
+  
+  // 如果任务已结束，不启动SSE连接，直接加载完整日志
+  if (isTaskFinished.value) {
+    streamStatusLabel.value = "任务已结束";
+    if (logLines.value.length === 0 || logLines.value.every(entry => entry.type === "system")) {
+      loadCompleteLogs();
+    }
+    return;
+  }
+  
+  // 检查任务状态，如果已结束则不启动SSE连接
+  if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+    isTaskFinished.value = true;
+    streamStatusLabel.value = "任务已结束";
+    if (logLines.value.length === 0 || logLines.value.every(entry => entry.type === "system")) {
+      loadCompleteLogs();
+    }
+    return;
+  }
+  
   const token = Auth.getAccessToken();
   if (!token) {
     streamStatusLabel.value = "未登录";
     return;
   }
+  
   const baseURL = import.meta.env.VITE_APP_BASE_API?.replace(/\/$/, "") || "";
-  const url = `${baseURL}/operations/node/task/${taskId.value}/stream?token=${encodeURIComponent(token)}`;
+  const params = new URLSearchParams({ token });
+  const lastLogEntry = [...logLines.value].reverse().find((entry) => entry.type !== "system");
+  if (lastLogEntry?.id) {
+    params.set("last_event_id", lastLogEntry.id);
+  }
+  
+  const url = `${baseURL}/operations/node/task/${taskId.value}/stream?${params.toString()}`;
   const source = new EventSource(url, { withCredentials: false });
   eventSource.value = source;
   streamStatusLabel.value = "连接中…";
 
   source.addEventListener("open", () => {
+    console.log("[SSE] 连接已建立, readyState:", source.readyState);
     streamStatusLabel.value = "已连接";
-  });
-
-  source.addEventListener("log", (event) => {
-    appendLog((event as MessageEvent).data);
-  });
-
-  source.addEventListener("info", (event) => {
-    appendLog((event as MessageEvent).data);
-  });
-
-  source.addEventListener("error", (event) => {
-    console.error("日志流异常", event);
-    streamStatusLabel.value = "连接异常";
-    if (source.readyState === EventSource.CLOSED) {
-      appendLog("[系统] 日志流已关闭");
+    
+    // 连接建立后再次检查任务状态
+    if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+      console.log("[SSE] 连接建立后发现任务已结束，关闭连接");
+      isTaskFinished.value = true;
+      stopLogStream();
+      streamStatusLabel.value = "任务已结束";
+      if (logLines.value.length === 0 || logLines.value.every(entry => entry.type === "system")) {
+        loadCompleteLogs();
+      }
+      return;
     }
   });
 
+  // 通用message事件监听器（作为后备，处理没有event类型的事件）
+  source.onmessage = (event: MessageEvent) => {
+    console.log("[SSE] 收到message事件（通用）:", event);
+    try {
+      handleSSEEvent(event, "log");
+    } catch (error) {
+      console.error("[SSE] 处理message事件失败:", error, event);
+    }
+  };
+
+  // 统一处理标准化的SSE事件
+  source.addEventListener("task_log", (event) => {
+    console.log("[SSE] 收到task_log事件:", event);
+    handleSSEEvent(event as MessageEvent, "log");
+  });
+
+  source.addEventListener("task_status", (event) => {
+    console.log("[SSE] 收到task_status事件:", event);
+    handleSSEEvent(event as MessageEvent);
+  });
+
+  source.addEventListener("task_info", (event) => {
+    console.log("[SSE] 收到task_info事件:", event);
+    handleSSEEvent(event as MessageEvent, "info");
+  });
+
+  source.addEventListener("task_error", (event) => {
+    console.log("[SSE] 收到task_error事件:", event);
+    handleSSEEvent(event as MessageEvent, "error");
+  });
+
+  source.addEventListener("task_end", (event) => {
+    console.log("[SSE] 收到task_end事件:", event);
+    handleSSEEvent(event as MessageEvent, "end");
+  });
+
+  // 兼容旧格式的事件监听器
+  source.addEventListener("log", (event) => {
+    console.log("[SSE] 收到log事件:", event);
+    handleSSEEvent(event as MessageEvent, "log");
+  });
+
+  source.addEventListener("status", (event) => {
+    console.log("[SSE] 收到status事件:", event);
+    handleSSEEvent(event as MessageEvent);
+  });
+
+  source.addEventListener("info", (event) => {
+      handleSSEEvent(event as MessageEvent, "info");
+  });
+
   source.addEventListener("end", (event) => {
-    appendLog((event as MessageEvent).data);
-    streamStatusLabel.value = "已结束";
-    stopLogStream();
+    handleSSEEvent(event as MessageEvent, "end");
+    if (taskDetail.value && !taskDetail.value.task_status) {
+      taskDetail.value.task_status = "success";
+    }
+  });
+
+  source.addEventListener("error", (event) => {
+    console.log("[SSE] 收到error事件:", {
+      event,
+      readyState: source.readyState,
+      url: source.url,
+      taskId: taskId.value,
+      taskStatus: taskDetail.value?.task_status,
+      isTaskFinished: isTaskFinished.value,
+    });
+    
+    // CONNECTING状态(0)的错误可能是连接建立过程中的正常情况，暂时忽略
+    if (source.readyState === EventSource.CONNECTING) {
+      console.log("[SSE] 连接建立中，忽略错误");
+      return;
+    }
+    
+    if (isTaskFinished.value) {
+      console.log("[SSE] 任务已结束，关闭连接");
+      stopLogStream();
+      streamStatusLabel.value = "任务已结束";
+      return;
+    }
+    
+    if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+      isTaskFinished.value = true;
+      stopLogStream();
+      streamStatusLabel.value = "任务已结束";
+      return;
+    }
+    
+    if (source.readyState === EventSource.CLOSED) {
+      console.log("[SSE] 连接已关闭");
+      if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+        isTaskFinished.value = true;
+        streamStatusLabel.value = "任务已结束";
+        stopLogStream();
+        return;
+      }
+      // 如果连接关闭但任务还在运行，可能是网络问题
+      streamStatusLabel.value = "连接已断开";
+    } else if (source.readyState === EventSource.OPEN) {
+      console.log("[SSE] 连接已打开，但收到错误事件");
+    }
   });
 }
 
@@ -269,8 +549,117 @@ function stopLogStream() {
   }
 }
 
+// ==================== 任务详情管理 ====================
+
+/**
+ * 检查任务是否正在运行
+ */
+function isTaskRunning(): boolean {
+  return taskDetail.value?.task_status === "running";
+}
+
+/**
+ * 获取任务详情
+ */
+async function fetchTaskDetail() {
+  if (!taskId.value) return;
+  loading.value = true;
+  try {
+    const response = await NodeAPI.getTaskDetail(taskId.value);
+    const previousStatus = taskDetail.value?.task_status;
+    taskDetail.value = response.data.data;
+    
+    const currentStatus = taskDetail.value?.task_status;
+    const isRunning = currentStatus === "running";
+    const isFinished = currentStatus && ["success", "failed"].includes(currentStatus);
+    
+    if (isFinished) {
+      isTaskFinished.value = true;
+      if (previousStatus && previousStatus === "running") {
+        stopTaskDetailRefresh();
+      }
+    } else {
+      isTaskFinished.value = false;
+    }
+    
+    // 如果任务不是运行状态，停止定时刷新
+    if (!isRunning) {
+      stopTaskDetailRefresh();
+    }
+  } catch (error: any) {
+    console.error(error);
+  } finally {
+    loading.value = false;
+  }
+}
+
+// ==================== 定时刷新管理 ====================
+
+let taskDetailRefreshTimer: number | null = null;
+
+function stopTaskDetailRefresh() {
+  if (taskDetailRefreshTimer) {
+    clearInterval(taskDetailRefreshTimer);
+    taskDetailRefreshTimer = null;
+  }
+}
+
+function startTaskDetailRefresh() {
+  stopTaskDetailRefresh();
+  if (isTaskRunning()) {
+    taskDetailRefreshTimer = window.setInterval(async () => {
+      if (!isTaskRunning()) {
+        stopTaskDetailRefresh();
+        return;
+      }
+      await fetchTaskDetail();
+    }, 5000);
+  }
+}
+
+// ==================== 完整日志加载 ====================
+
+async function loadCompleteLogs() {
+  if (!taskId.value) return;
+  try {
+    const response = await NodeAPI.getTaskLog(taskId.value);
+    const content = response.data.data?.content || "";
+    if (content) {
+      const lines = content.split("\n").filter((line: string) => line.trim().length > 0);
+      logLines.value = [];
+      lines.forEach((line: string) => {
+        const match = line.match(/^\[([^\]]+)\]\s*(.*)$/);
+        if (match) {
+          const [, timestamp, message] = match;
+          appendLogEntry({
+            id: `log-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            timestamp: normalizeTimestamp(timestamp),
+            message: message.trim(),
+            type: "log",
+          });
+        } else {
+          appendLogEntry({
+            id: `log-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            timestamp: nowTimestamp(),
+            message: line.trim(),
+            type: "log",
+          });
+        }
+      });
+    }
+  } catch (error: any) {
+    console.error("加载完整日志失败", error);
+  }
+}
+
+// ==================== 用户操作 ====================
+
 function restartStream() {
-  logLines.value.push("[系统] 正在重新建立连接…");
+  if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+    ElMessage.warning("任务已结束，无法重连");
+    return;
+  }
+  appendSystemLog("正在重新建立连接…");
   startLogStream();
 }
 
@@ -302,26 +691,29 @@ function reloadDetail() {
   fetchTaskDetail();
 }
 
+// ==================== 生命周期 ====================
+
 watch(
   () => taskId.value,
-  (newId) => {
+  async (newId) => {
     if (!newId) return;
+    stopTaskDetailRefresh();
+    stopLogStream();
     logLines.value = [];
-    fetchTaskDetail();
+    isTaskFinished.value = false;
+    
+    await fetchTaskDetail();
     startLogStream();
+    startTaskDetailRefresh();
   },
   { immediate: true }
 );
 
-onMounted(() => {
-  if (taskId.value) {
-    fetchTaskDetail();
-    startLogStream();
-  }
-});
+// onMounted 不需要，watch 的 immediate: true 已经会在初始化时执行
 
 onBeforeUnmount(() => {
   stopLogStream();
+  stopTaskDetailRefresh();
 });
 </script>
 
@@ -344,6 +736,37 @@ onBeforeUnmount(() => {
 
 .log-line {
   margin: 0;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.log-timestamp {
+  color: #67c23a;
+  font-weight: 500;
+  min-width: 160px;
+}
+
+.log-line--info .log-timestamp {
+  color: #409eff;
+}
+
+.log-line--error .log-timestamp {
+  color: #f56c6c;
+}
+
+.log-line--end .log-timestamp {
+  color: #e6a23c;
+}
+
+.log-line--system .log-timestamp {
+  color: #909399;
+}
+
+.log-message {
+  white-space: pre-wrap;
+  word-break: break-word;
+  flex: 1;
 }
 
 .log-empty {

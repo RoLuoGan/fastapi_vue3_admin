@@ -10,7 +10,7 @@ class PaginationQueryParam:
     def __init__(
         self,
         page_no: Optional[int] = Query(default=None, description="当前页码", ge=1),
-        page_size: Optional[int] = Query(default=None, description="每页数量", ge=1, le=100), 
+        page_size: Optional[int] = Query(default=None, description="每页数量", ge=1, le=1000), 
         order_by: Optional[str] = Query(default=None, description="排序字段,格式:field1,asc;field2,desc"),
     ) -> None:
         """
@@ -18,7 +18,7 @@ class PaginationQueryParam:
         
         参数:
         - page_no (int | None): 当前页码，默认 None。
-        - page_size (int | None): 每页数量，默认 None，最大 100。
+        - page_size (int | None): 每页数量，默认 None，最大 1000。
         - order_by (str | None): 排序字段，格式 'field,asc;field2,desc'。
         
         返回:

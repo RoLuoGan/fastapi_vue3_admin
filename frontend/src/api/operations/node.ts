@@ -154,6 +154,8 @@ export interface ServiceQueryParam {
   name?: string;
   code?: string;
   status?: boolean;
+  project?: string;
+  module_group?: string;
   start_time?: string;
   end_time?: string;
 }
@@ -162,6 +164,8 @@ export interface ServicePageQuery extends PageQuery {
   name?: string;
   code?: string;
   status?: boolean;
+  project?: string;
+  module_group?: string;
   start_time?: string;
   end_time?: string;
 }
@@ -172,6 +176,8 @@ export interface ServiceTable {
   code?: string;
   status?: boolean;
   description?: string;
+  project?: string;
+  module_group?: string;
   created_at?: string;
   updated_at?: string;
   creator?: creatorType;
@@ -184,16 +190,23 @@ export interface ServiceForm {
   code?: string;
   status?: boolean;
   description?: string;
+  project?: string;
+  module_group?: string;
+  nodes?: number[];
 }
 
 export interface NodeTable {
   id?: number;
   service_id?: number;
   service_name?: string;
+  services?: ServiceTable[];
   ip?: string;
   port?: number;
   status?: boolean;
   description?: string;
+  project?: string;
+  idc?: string;
+  tags?: string;
   created_at?: string;
   updated_at?: string;
   creator?: creatorType;
@@ -206,12 +219,18 @@ export interface NodeForm {
   port?: number;
   status?: boolean;
   description?: string;
+  project?: string;
+  idc?: string;
+  tags?: string;
 }
 
 export interface NodePageQuery extends PageQuery {
   service_id?: number;
   ip?: string;
   status?: boolean;
+  project?: string;
+  idc?: string;
+  tags?: string;
   start_time?: string;
   end_time?: string;
 }
@@ -229,6 +248,9 @@ export interface TaskTable {
   params?: Record<string, any> | null;
   log_path?: string | null;
   error_message?: string;
+  project?: string;
+  idc?: string;
+  module_group?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -239,6 +261,9 @@ export interface TaskPageQuery extends PageQuery {
   service_id?: number;
   node_id?: number;
   ip?: string;
+  project?: string;
+  idc?: string;
+  module_group?: string;
   start_time?: string;
   end_time?: string;
 }

@@ -3,7 +3,7 @@
 任务路由
 """
 
-from fastapi import APIRouter, Depends, Body, Path
+from fastapi import APIRouter, Depends, Body, Path, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.common.response import SuccessResponse
@@ -103,11 +103,33 @@ async def delete_task_controller(
 
 @router.get("/task/{task_id}/stream", summary="任务日志流", description="任务日志SSE流")
 async def stream_task_log_controller(
+    request: Request,
     task_id: int = Path(..., description="任务ID"),
     auth: AuthSchema = Depends(get_current_user_by_query),
 ) -> StreamingResponse:
     permission_checker = AuthPermission(["operations:task:log"], check_data_scope=False)
     auth = await permission_checker(auth)
-    generator = await TaskService.stream_task_log_service(auth=auth, task_id=task_id)
-    return StreamingResponse(generator, media_type="text/event-stream")
+    last_event_id = (
+        request.headers.get("last-event-id")
+        or request.query_params.get("last_event_id")
+        or request.query_params.get("lastEventId")
+    )
+    # stream_task_log_service 返回 AsyncGenerator，await 获取生成器
+    # 生成器已经返回字节格式，直接使用
+    generator = await TaskService.stream_task_log_service(
+        auth=auth,
+        task_id=task_id,
+        last_event_id=last_event_id,
+    )
+    
+    return StreamingResponse(
+        generator,
+        media_type="text/event-stream; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # 禁用nginx缓冲
+            "Content-Encoding": "identity",  # 禁用压缩，确保实时推送
+        },
+    )
 

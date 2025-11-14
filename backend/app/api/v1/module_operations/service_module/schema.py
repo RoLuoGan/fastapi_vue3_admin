@@ -22,6 +22,9 @@ class ServiceCreateSchema(BaseModel):
     code: Optional[str] = Field(default=None, max_length=50, description="服务模块编码")
     status: bool = Field(default=True, description="是否启用(True:启用 False:停用)")
     description: Optional[str] = Field(default=None, max_length=255, description="备注说明")
+    project: Optional[str] = Field(default=None, max_length=50, description="运维管理项目")
+    module_group: Optional[str] = Field(default=None, max_length=50, description="模块分组")
+    node_ids: Optional[List[int]] = Field(default=None, description="关联的节点ID列表")
 
     @field_validator("name")
     @classmethod

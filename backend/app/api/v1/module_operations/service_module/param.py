@@ -17,6 +17,8 @@ class ServiceQueryParam:
         name: Optional[str] = Query(None, description="服务模块名称"),
         code: Optional[str] = Query(None, description="服务模块编码"),
         status: Optional[bool] = Query(None, description="服务模块状态(True正常 False停用)"),
+        project: Optional[str] = Query(None, description="运维管理项目"),
+        module_group: Optional[str] = Query(None, description="模块分组"),
         start_time: Optional[DateTimeStr] = Query(None, description="开始时间", example="2025-01-01 00:00:00"),
         end_time: Optional[DateTimeStr] = Query(None, description="结束时间", example="2025-12-31 23:59:59"),
     ) -> None:
@@ -27,6 +29,8 @@ class ServiceQueryParam:
 
         # 精确查询字段
         self.status = status
+        self.project = project
+        self.module_group = module_group
 
         # 时间范围查询
         if start_time and end_time:

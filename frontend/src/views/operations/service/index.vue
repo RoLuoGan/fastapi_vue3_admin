@@ -27,6 +27,16 @@
             <el-option :value="false" label="停用" />
           </el-select>
         </el-form-item>
+        <el-form-item label="运维管理项目">
+          <el-select v-model="queryFormData.project" placeholder="全部" clearable style="width: 200px">
+            <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="模块分组">
+          <el-select v-model="queryFormData.module_group" placeholder="全部" clearable style="width: 200px">
+            <el-option v-for="item in moduleGroupOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+          </el-select>
+        </el-form-item>
       </el-form>
     </el-card>
 
@@ -151,8 +161,20 @@
           <el-descriptions-item label="创建时间">
             {{ serviceDetail?.created_at || "-" }}
           </el-descriptions-item>
+          <el-descriptions-item label="运维管理项目">
+            {{ serviceDetail?.project || "-" }}
+          </el-descriptions-item>
+          <el-descriptions-item label="模块分组">
+            {{ serviceDetail?.module_group || "-" }}
+          </el-descriptions-item>
           <el-descriptions-item label="描述" :span="2">
             {{ serviceDetail?.description || "-" }}
+          </el-descriptions-item>
+          <el-descriptions-item label="关联服务器" :span="2">
+            <el-tag v-for="node in serviceDetail?.nodes || []" :key="node.id" class="mr-2">
+              {{ node.ip }}:{{ node.port }}
+            </el-tag>
+            <span v-if="!serviceDetail?.nodes || serviceDetail.nodes.length === 0">-</span>
           </el-descriptions-item>
         </el-descriptions>
       </template>
@@ -174,6 +196,16 @@
               :inactive-value="false"
             />
           </el-form-item>
+          <el-form-item label="运维管理项目" prop="project">
+            <el-select v-model="serviceForm.project" placeholder="请选择运维管理项目" clearable style="width: 100%">
+              <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="模块分组" prop="module_group">
+            <el-select v-model="serviceForm.module_group" placeholder="请选择模块分组" clearable style="width: 100%">
+              <el-option v-for="item in moduleGroupOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="描述" prop="description">
             <el-input
               v-model="serviceForm.description"
@@ -183,6 +215,11 @@
               :maxlength="255"
               show-word-limit
             />
+          </el-form-item>
+          <el-form-item label="关联服务器" prop="nodes">
+            <el-select v-model="serviceForm.nodes" multiple placeholder="请选择关联的服务器" clearable style="width: 100%">
+              <el-option v-for="node in nodeOptions" :key="node.id" :label="`${node.ip}:${node.port}`" :value="node.id" />
+            </el-select>
           </el-form-item>
         </el-form>
       </div>
@@ -211,6 +248,7 @@ import NodeAPI, {
   type ServicePageQuery,
   type ServiceTable,
 } from "@/api/operations/node";
+import DictAPI from "@/api/system/dict";
 
 type DialogType = "create" | "update" | "detail";
 
@@ -227,7 +265,12 @@ const queryFormData = reactive<ServicePageQuery>({
   name: "",
   code: "",
   status: undefined,
+  project: undefined,
+  module_group: undefined,
 });
+
+const projectOptions = ref<any[]>([]);
+const moduleGroupOptions = ref<any[]>([]);
 
 const dialog = reactive({
   visible: false,
@@ -242,9 +285,12 @@ const serviceForm = reactive<ServiceForm>({
   code: "",
   status: true,
   description: "",
+  project: undefined,
+  module_group: undefined,
 });
 
 const serviceDetail = ref<ServiceTable>();
+const nodeOptions = ref<any[]>([]);
 
 const serviceRules: FormRules<ServiceForm> = {
   name: [
@@ -306,6 +352,31 @@ function resetForm() {
   serviceForm.code = "";
   serviceForm.status = true;
   serviceForm.description = "";
+  serviceForm.project = undefined;
+  serviceForm.module_group = undefined;
+  (serviceForm as any).nodes = [];
+}
+
+async function loadDictOptions() {
+  try {
+    const [projectRes, moduleGroupRes] = await Promise.all([
+      DictAPI.getInitDict("operations_project"),
+      DictAPI.getInitDict("operations_module_group"),
+    ]);
+    projectOptions.value = projectRes.data.data || [];
+    moduleGroupOptions.value = moduleGroupRes.data.data || [];
+  } catch (error: any) {
+    console.error(error);
+  }
+}
+
+async function loadNodeOptions() {
+  try {
+    const response = await NodeAPI.getNodePage({ page_no: 1, page_size: 1000 });
+    nodeOptions.value = response.data.data.items || [];
+  } catch (error: any) {
+    console.error(error);
+  }
 }
 
 async function handleOpenDialog(type: DialogType, id?: number) {
@@ -337,6 +408,9 @@ async function handleOpenDialog(type: DialogType, id?: number) {
       serviceForm.code = detail.code || "";
       serviceForm.status = detail.status ?? true;
       serviceForm.description = detail.description || "";
+      serviceForm.project = detail.project;
+      serviceForm.module_group = detail.module_group;
+      (serviceForm as any).nodes = detail.nodes?.map((n: any) => n.id) || [];
     }
   } catch (error: any) {
     console.error(error);
@@ -356,11 +430,16 @@ function handleSubmit() {
     if (!valid) return;
     dialogLoading.value = true;
     try {
+      // 准备提交数据，包含节点ID列表
+      const submitData = {
+        ...serviceForm,
+        node_ids: (serviceForm as any).nodes || [],
+      };
       if (dialog.type === "create") {
-        await NodeAPI.createService(serviceForm);
+        await NodeAPI.createService(submitData);
         ElMessage.success("新增服务成功");
       } else if (dialog.targetId) {
-        await NodeAPI.updateService(dialog.targetId, serviceForm);
+        await NodeAPI.updateService(dialog.targetId, submitData);
         ElMessage.success("更新服务成功");
       }
       dialog.visible = false;
@@ -393,6 +472,8 @@ async function handleDelete(ids: number[]) {
 }
 
 onMounted(() => {
+  loadDictOptions();
+  loadNodeOptions();
   loadData();
 });
 </script>
