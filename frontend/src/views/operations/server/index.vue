@@ -177,7 +177,7 @@
             {{ nodeDetail?.description || "-" }}
           </el-descriptions-item>
           <el-descriptions-item label="关联服务模块" :span="2">
-            <el-tag v-for="service in nodeDetail?.services || []" :key="service.id" class="mr-2">
+            <el-tag v-for="service in nodeDetail?.services || []" :key="service.id" class="mr-2" size="small">
               {{ service.name }}
             </el-tag>
             <span v-if="!nodeDetail?.services || nodeDetail.services.length === 0">-</span>
@@ -227,8 +227,15 @@
               show-word-limit
             />
           </el-form-item>
-          <el-form-item label="关联服务模块" prop="service_id">
-            <el-select v-model="nodeForm.service_id" placeholder="请选择关联的服务模块" clearable style="width: 100%">
+          <el-form-item label="关联服务模块" prop="service_ids">
+            <el-select 
+              v-model="nodeForm.service_ids" 
+              multiple 
+              filterable 
+              placeholder="请选择关联的服务模块" 
+              clearable 
+              style="width: 100%"
+            >
               <el-option v-for="service in serviceOptions" :key="service.id" :label="service.name" :value="service.id" />
             </el-select>
           </el-form-item>
@@ -262,6 +269,7 @@ import NodeAPI, {
 } from "@/api/operations/node";
 import DictAPI from "@/api/system/dict";
 
+// 对话框类型
 type DialogType = "create" | "update" | "detail";
 
 interface ServiceOption {
@@ -301,6 +309,7 @@ const dialog = reactive({
 const nodeFormRef = ref<FormInstance>();
 const nodeForm = reactive<NodeForm>({
   service_id: undefined,
+  service_ids: [] as number[],
   ip: "",
   port: 22,
   status: true,
@@ -391,6 +400,7 @@ function handleReset() {
 
 function resetForm() {
   nodeForm.service_id = undefined;
+  nodeForm.service_ids = [];
   nodeForm.ip = "";
   nodeForm.port = 22;
   nodeForm.status = true;
@@ -426,6 +436,7 @@ async function handleOpenDialog(type: DialogType, id?: number) {
     if (type === "update") {
       nodeForm.id = detail.id;
       nodeForm.service_id = detail.service_id;
+      nodeForm.service_ids = detail.services?.map((s: any) => s.id) || [];
       nodeForm.ip = detail.ip || "";
       nodeForm.port = detail.port || 22;
       nodeForm.status = detail.status ?? true;
@@ -433,8 +444,6 @@ async function handleOpenDialog(type: DialogType, id?: number) {
       nodeForm.project = detail.project;
       nodeForm.idc = detail.idc;
       nodeForm.tags = detail.tags;
-      // 设置关联的服务模块ID
-      nodeForm.service_id = detail.service_id;
     }
   } catch (error: any) {
     console.error(error);
@@ -454,11 +463,15 @@ function handleSubmit() {
     if (!valid) return;
     dialogLoading.value = true;
     try {
+      const submitData = {
+        ...nodeForm,
+        service_ids: nodeForm.service_ids || []
+      };
       if (dialog.type === "create") {
-        await NodeAPI.createNode(nodeForm);
+        await NodeAPI.createNode(submitData);
         ElMessage.success("新增节点成功");
       } else if (dialog.targetId) {
-        await NodeAPI.updateNode(dialog.targetId, nodeForm);
+        await NodeAPI.updateNode(dialog.targetId, submitData);
         ElMessage.success("更新节点成功");
       }
       dialog.visible = false;

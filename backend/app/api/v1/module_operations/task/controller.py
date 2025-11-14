@@ -14,7 +14,7 @@ from app.core.logger import logger
 from app.api.v1.module_system.auth.schema import AuthSchema
 
 from .param import TaskQueryParam
-from .schema import TaskLogSchema, NodeIdsSchema  # noqa: F401  # 触发前向引用
+from .schema import TaskLogSchema, ExecuteTaskSchema  # noqa: F401  # 触发前向引用
 from ..server.schema import ServerOutSchema  # noqa: F401
 from ..service_module.schema import ServiceOutSchema  # noqa: F401
 from .service import TaskService
@@ -22,26 +22,19 @@ from .service import TaskService
 router = APIRouter(route_class=OperationLogRoute, prefix="/node", tags=["任务管理"])
 
 
-@router.post("/deploy", summary="部署服务", description="多样化服务部署（模拟）")
-async def deploy_controller(
-    data: NodeIdsSchema,
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:deploy"])),
+@router.post("/execute", summary="执行任务", description="统一的任务执行接口（部署/重启）")
+async def execute_task_controller(
+    data: ExecuteTaskSchema,
+    auth: AuthSchema = Depends(AuthPermission(["operations:node:deploy", "operations:node:restart"])),
 ) -> JSONResponse:
-    node_ids = data.node_ids
-    result = await TaskService.deploy_service(node_ids=node_ids, auth=auth)
-    logger.info(f"部署服务成功: {result}")
-    return SuccessResponse(data=result, msg="部署任务已启动")
-
-
-@router.post("/restart", summary="重启服务", description="重启服务（模拟）")
-async def restart_controller(
-    data: NodeIdsSchema,
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:restart"])),
-) -> JSONResponse:
-    node_ids = data.node_ids
-    result = await TaskService.restart_service(node_ids=node_ids, auth=auth)
-    logger.info(f"重启服务成功: {result}")
-    return SuccessResponse(data=result, msg="重启任务已启动")
+    result = await TaskService.execute_task_service(
+        node_ids=data.node_ids,
+        task_type=data.task_type,
+        auth=auth
+    )
+    task_name = "部署" if data.task_type == "deploy" else "重启"
+    logger.info(f"{task_name}服务成功: {result}")
+    return SuccessResponse(data=result, msg=f"{task_name}任务已启动")
 
 
 @router.get("/task/recent", summary="查询最近任务", description="查询最近20个任务")

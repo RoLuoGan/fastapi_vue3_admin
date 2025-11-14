@@ -28,62 +28,80 @@ class TaskService:
     """任务管理服务层 - 只负责业务拼装和调度"""
 
     @classmethod
-    def _build_task_params(cls, auth: AuthSchema, node: Any, task_type: str) -> Dict[str, Any]:
+    def _build_task_params(cls, auth: AuthSchema, nodes: List[Any], task_type: str) -> Dict[str, Any]:
+        """构建任务参数 - 支持多节点（新格式）"""
         user = auth.user
         operator_name = None
         if user:
             operator_name = getattr(user, "name", None) or getattr(user, "nickname", None) or user.username
         return {
-            "task_type": task_type,
+            "task_type": "node_operator",
+            "operator_type": task_type,  # deploy 或 restart
             "operator_id": user.id if user else None,
             "operator_name": operator_name,
             "trigger_time": datetime.utcnow().isoformat(),
-            "node": {
-                "id": node.id,
-                "ip": node.ip,
-                "port": node.port,
-                "service_id": node.service_id,
-            },
+            "operator_metas": [
+                {
+                    "id": node.id,
+                    "ip": node.ip,
+                    "port": node.port or 22,
+                    "service_id": node.service_id,
+                }
+                for node in nodes
+            ],
         }
 
     @classmethod
-    async def _create_tasks(
+    async def _create_task(
         cls,
         auth: AuthSchema,
         nodes: List[Any],
         task_type: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """
-        创建任务记录
+        创建单个批次任务记录（包含多个节点）
         委托日志路径构建给 TaskExecutor，委托日志写入给 TaskExecutor
         """
         task_crud = TaskCRUD(auth)
-        task_records: List[Dict[str, Any]] = []
-
-        for node in nodes:
-            # 委托给 TaskExecutor 构建日志路径
-            log_path = TaskExecutor.build_log_path(task_type=task_type, node_ip=node.ip)
-            
-            params_dict = cls._build_task_params(auth=auth, node=node, task_type=task_type)
-            task_data = {
-                "service_id": node.service_id,
-                "node_id": node.id,
-                "ip": node.ip,
-                "task_type": task_type,
-                "task_status": "running",
-                "progress": 0,
-                "log_path": str(log_path),
-                "params": json.dumps(params_dict, ensure_ascii=False),
-            }
-            task = await task_crud.create(data=task_data)
-            
-            # 委托给 TaskExecutor 写入初始日志
-            await TaskExecutor.write_log(log_path, "任务创建成功，等待执行")
-            
-            task_records.append({"task": task, "log_path": log_path})
-
+        
+        # 使用时间戳作为日志文件名标识
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_path = TaskExecutor.build_log_path(task_type=task_type, node_ip=f"batch_{timestamp}")
+        
+        # 构建新格式的任务参数
+        params_dict = cls._build_task_params(auth=auth, nodes=nodes, task_type=task_type)
+        
+        # 准备任务数据
+        task_data = {
+            "task_type": task_type,
+            "task_status": "running",
+            "progress": 0,
+            "log_path": str(log_path),
+            "params": json.dumps(params_dict, ensure_ascii=False),
+            "total_nodes": len(nodes),
+            "success_nodes": 0,
+            "failed_nodes": 0,
+        }
+        
+        # 如果所有节点来自同一个服务模块，记录service_id
+        service_ids = set(node.service_id for node in nodes if node.service_id)
+        if len(service_ids) == 1:
+            task_data["service_id"] = list(service_ids)[0]
+        
+        # 记录第一个节点的IP和ID（用于向后兼容）
+        if nodes:
+            task_data["node_id"] = nodes[0].id
+            task_data["ip"] = nodes[0].ip
+        
+        task = await task_crud.create(data=task_data)
+        
+        # 写入初始日志
+        await TaskExecutor.write_log(log_path, f"批次任务创建成功，共 {len(nodes)} 个节点")
+        for idx, node in enumerate(nodes, 1):
+            await TaskExecutor.write_log(log_path, f"  {idx}. {node.ip}:{node.port or 22}")
+        
         await auth.db.commit()
-        return task_records
+        return {"task": task, "log_path": log_path, "nodes": nodes}
 
     @classmethod
     async def get_recent_tasks_service(cls, auth: AuthSchema, limit: int = 20) -> List[Dict]:
@@ -169,10 +187,26 @@ class TaskService:
                     logger.warning(f"删除任务日志失败 {path}: {exc}")
 
     @classmethod
-    async def deploy_service(cls, auth: AuthSchema, node_ids: List[int]) -> Dict:
+    async def execute_task_service(cls, auth: AuthSchema, node_ids: List[int], task_type: str) -> Dict:
+        """
+        执行任务 - 统一的任务执行入口
+        
+        参数:
+        - auth: 认证信息
+        - node_ids: 节点ID列表
+        - task_type: 任务类型 (deploy 或 restart)
+        
+        返回:
+        - Dict: 包含任务信息的字典
+        """
         if not node_ids:
-            raise CustomException(msg="请选择需要部署的节点")
+            task_name = "部署" if task_type == "deploy" else "重启"
+            raise CustomException(msg=f"请选择需要{task_name}的节点")
+        
+        if task_type not in ("deploy", "restart"):
+            raise CustomException(msg="任务类型只能是 deploy 或 restart")
 
+        # 获取所有节点信息
         nodes = []
         for node_id in node_ids:
             node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
@@ -180,58 +214,29 @@ class TaskService:
                 raise CustomException(msg=f"节点ID {node_id} 不存在")
             nodes.append(node)
 
-        task_records = await cls._create_tasks(auth=auth, nodes=nodes, task_type="deploy")
+        # 创建单个批次任务（包含所有节点）
+        task_record = await cls._create_task(auth=auth, nodes=nodes, task_type=task_type)
 
-        for record in task_records:
-            task = record["task"]
-            log_path = Path(record["log_path"])
-            # 使用 TaskExecutor 执行任务
-            asyncio.create_task(
-                TaskExecutor.execute_task(
-                    base_auth=auth,
-                    task_id=task.id,
-                    log_path=log_path,
-                    task_type="deploy",
-                )
+        task = task_record["task"]
+        log_path = Path(task_record["log_path"])
+
+        # 使用 TaskExecutor 执行批次任务
+        asyncio.create_task(
+            TaskExecutor.execute_batch_task(
+                base_auth=auth,
+                task_id=task.id,
+                log_path=log_path,
+                nodes=nodes,
+                task_type=task_type,
             )
+        )
 
+        task_name = "部署" if task_type == "deploy" else "重启"
         return {
-            "message": "部署任务已启动",
-            "task_ids": [record["task"].id for record in task_records],
-            "task_count": len(task_records),
-        }
-
-    @classmethod
-    async def restart_service(cls, auth: AuthSchema, node_ids: List[int]) -> Dict:
-        if not node_ids:
-            raise CustomException(msg="请选择需要重启的节点")
-
-        nodes = []
-        for node_id in node_ids:
-            node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
-            if not node:
-                raise CustomException(msg=f"节点ID {node_id} 不存在")
-            nodes.append(node)
-
-        task_records = await cls._create_tasks(auth=auth, nodes=nodes, task_type="restart")
-
-        for record in task_records:
-            task = record["task"]
-            log_path = Path(record["log_path"])
-            # 使用 TaskExecutor 执行任务
-            asyncio.create_task(
-                TaskExecutor.execute_task(
-                    base_auth=auth,
-                    task_id=task.id,
-                    log_path=log_path,
-                    task_type="restart",
-                )
-            )
-
-        return {
-            "message": "重启任务已启动",
-            "task_ids": [record["task"].id for record in task_records],
-            "task_count": len(task_records),
+            "message": f"{task_name}任务已启动",
+            "task_id": task.id,
+            "node_count": len(nodes),
+            "task_type": task_type,
         }
 
     @classmethod

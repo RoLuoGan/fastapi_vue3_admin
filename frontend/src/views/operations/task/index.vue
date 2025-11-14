@@ -29,19 +29,6 @@
             <el-option label="失败" value="failed" />
           </el-select>
         </el-form-item>
-        <el-form-item label="服务模块">
-          <el-select v-model="queryFormData.service_id" placeholder="全部" clearable style="width: 200px">
-            <el-option
-              v-for="item in serviceOptions"
-              :key="item.id"
-              :label="item.name"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="节点IP">
-          <el-input v-model="queryFormData.ip" placeholder="请输入节点IP" clearable />
-        </el-form-item>
         <el-form-item label="运维管理项目">
           <el-select v-model="queryFormData.project" placeholder="全部" clearable style="width: 200px">
             <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
@@ -107,8 +94,6 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="ip" label="节点IP" min-width="150" />
-        <el-table-column prop="service_name" label="服务模块" min-width="160" />
         <el-table-column prop="progress" label="进度" min-width="160">
           <template #default="{ row }">
             <el-progress
@@ -180,14 +165,8 @@ import { ElMessage, ElMessageBox, type FormInstance } from "element-plus";
 import NodeAPI, {
   type TaskPageQuery,
   type TaskTable,
-  type ServiceTable,
 } from "@/api/operations/node";
 import DictAPI from "@/api/system/dict";
-
-interface ServiceOption {
-  id: number;
-  name: string;
-}
 
 const route = useRoute();
 const router = useRouter();
@@ -197,8 +176,6 @@ const total = ref(0);
 const selectionIds = ref<number[]>([]);
 const createdRange = ref<[string, string] | []>([]);
 
-const serviceOptions = ref<ServiceOption[]>([]);
-
 const showDetailPage = computed(() => route.name === "OperationsTaskDetail");
 
 const queryFormRef = ref<FormInstance>();
@@ -207,8 +184,6 @@ const queryFormData = reactive<TaskPageQuery>({
   page_size: 10,
   task_type: undefined,
   task_status: undefined,
-  service_id: undefined,
-  ip: "",
   project: undefined,
   idc: undefined,
   module_group: undefined,
@@ -227,19 +202,6 @@ function handleDateChange(value: [string, string] | null) {
   } else {
     queryFormData.start_time = undefined;
     queryFormData.end_time = undefined;
-  }
-}
-
-async function loadServiceOptions() {
-  try {
-    const response = await NodeAPI.getServiceTree({ status: true });
-    const list = response.data.data || [];
-    serviceOptions.value = list.map((item: ServiceTable) => ({
-      id: item.id!,
-      name: item.name || "-",
-    }));
-  } catch (error: any) {
-    console.error(error);
   }
 }
 
@@ -374,7 +336,7 @@ async function handleDelete(ids: number[]) {
 
 onMounted(() => {
   loadDictOptions();
-  Promise.all([loadServiceOptions(), loadData()]);
+  loadData();
 });
 </script>
 

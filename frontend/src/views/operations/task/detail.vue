@@ -39,25 +39,19 @@
             {{ taskTypeLabel(taskDetail.task_type) }}
           </el-tag>
         </el-descriptions-item>
-        <el-descriptions-item label="所属服务">
-          {{ taskDetail.service?.name || taskDetail.service_name || "-" }}
-        </el-descriptions-item>
-        <el-descriptions-item label="节点IP">
-          {{ taskDetail.ip || "-" }}
-        </el-descriptions-item>
-        <el-descriptions-item label="任务状态">
-          <el-tag :type="statusTag(taskDetail.task_status)">
-            {{ statusLabel(taskDetail.task_status) }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="任务进度">
-          <el-progress
-            :percentage="taskDetail.progress || 0"
-            :status="progressStatus(taskDetail.task_status)"
-            :text-inside="true"
-            :stroke-width="18"
-            style="width: 180px"
-          />
+        <el-descriptions-item label="任务进度" :span="2">
+          <div class="flex items-center gap-4">
+            <el-tag :type="statusTag(taskDetail.task_status)" style="min-width: 60px">
+              {{ statusLabel(taskDetail.task_status) }}
+            </el-tag>
+            <el-progress
+              :percentage="taskDetail.progress || 0"
+              :status="progressStatus(taskDetail.task_status)"
+              :text-inside="true"
+              :stroke-width="18"
+              style="flex: 1; max-width: 300px"
+            />
+          </div>
         </el-descriptions-item>
         <el-descriptions-item label="创建时间">
           {{ taskDetail.created_at || "-" }}
@@ -90,6 +84,12 @@
             <span class="text-xs text-gray-500">
               状态：{{ streamStatusLabel }}
             </span>
+            <el-button size="small" icon="Top" @click="scrollToTop">
+              顶部
+            </el-button>
+            <el-button size="small" icon="Bottom" @click="scrollToBottom">
+              底部
+            </el-button>
             <el-button plain icon="Refresh" @click="restartStream">
               重连
             </el-button>
@@ -691,6 +691,24 @@ function reloadDetail() {
   fetchTaskDetail();
 }
 
+function scrollToTop() {
+  if (logContainerRef.value) {
+    logContainerRef.value.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
+  }
+}
+
+function scrollToBottom() {
+  if (logContainerRef.value) {
+    logContainerRef.value.scrollTo({
+      top: logContainerRef.value.scrollHeight,
+      behavior: 'smooth'
+    });
+  }
+}
+
 // ==================== 生命周期 ====================
 
 watch(
@@ -723,8 +741,9 @@ onBeforeUnmount(() => {
 }
 
 .log-container {
-  max-height: 420px;
+  height: 420px;
   overflow-y: auto;
+  overflow-x: hidden;
   background: #111;
   color: #d0f0ff;
   font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
@@ -732,6 +751,25 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   line-height: 1.6;
   white-space: pre-wrap;
+  scroll-behavior: smooth;
+}
+
+.log-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.log-container::-webkit-scrollbar-track {
+  background: #1a1a1a;
+  border-radius: 4px;
+}
+
+.log-container::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+.log-container::-webkit-scrollbar-thumb:hover {
+  background: #777;
 }
 
 .log-line {

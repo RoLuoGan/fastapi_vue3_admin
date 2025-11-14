@@ -130,21 +130,26 @@ const NodeAPI = {
     });
   },
 
-  // 部署和重启
-  deploy(nodeIds: number[]) {
+  // 统一的任务执行接口
+  executeTask(nodeIds: number[], taskType: 'deploy' | 'restart') {
     return request<ApiResponse>({
-      url: `${API_PATH}/deploy`,
+      url: `${API_PATH}/execute`,
       method: "post",
-      data: { node_ids: nodeIds },
+      data: { 
+        node_ids: nodeIds,
+        task_type: taskType
+      },
     });
   },
 
+  // 部署（使用统一接口）
+  deploy(nodeIds: number[]) {
+    return this.executeTask(nodeIds, 'deploy');
+  },
+
+  // 重启（使用统一接口）
   restart(nodeIds: number[]) {
-    return request<ApiResponse>({
-      url: `${API_PATH}/restart`,
-      method: "post",
-      data: { node_ids: nodeIds },
-    });
+    return this.executeTask(nodeIds, 'restart');
   },
 };
 
@@ -215,6 +220,7 @@ export interface NodeTable {
 export interface NodeForm {
   id?: number;
   service_id?: number;
+  service_ids?: number[];
   ip?: string;
   port?: number;
   status?: boolean;

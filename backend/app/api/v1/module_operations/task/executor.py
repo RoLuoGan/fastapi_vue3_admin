@@ -9,7 +9,7 @@ import random
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Any
 
 import aiofiles
 
@@ -138,4 +138,155 @@ class TaskExecutor:
                 )
                 await new_db.commit()
                 logger.error(f"任务执行失败: {exc}")
+
+    @classmethod
+    async def execute_batch_task(
+        cls,
+        *,
+        base_auth: AuthSchema,
+        task_id: int,
+        log_path: Path,
+        nodes: List[Any],
+        task_type: str,
+    ) -> None:
+        """
+        执行批次任务（多个节点）
+        
+        Args:
+            base_auth: 基础认证信息
+            task_id: 任务ID
+            log_path: 日志文件路径
+            nodes: 节点列表
+            task_type: 任务类型 (deploy/restart)
+        """
+        # 获取任务步骤
+        if task_type == "deploy":
+            steps = [
+                "检查节点状态",
+                "备份当前版本",
+                "下载新版本文件",
+                "停止旧服务",
+                "部署新版本",
+                "启动新服务",
+                "验证服务状态",
+            ]
+        else:  # restart
+            steps = [
+                "检查节点状态",
+                "停止服务",
+                "清理临时文件",
+                "启动服务",
+                "验证服务状态",
+            ]
+        
+        total_nodes = len(nodes)
+        success_count = 0
+        failed_count = 0
+        failure_rate = 0.15 if task_type == "deploy" else 0.10
+        
+        async with AsyncSessionLocal() as new_db:
+            new_auth = AuthSchema(db=new_db, user=base_auth.user, check_data_scope=False)
+            new_task_crud = TaskCRUD(new_auth)
+            
+            try:
+                await cls.write_log(log_path, f"开始执行批次{'部署' if task_type == 'deploy' else '重启'}任务")
+                await cls.write_log(log_path, f"共 {total_nodes} 个节点需要处理")
+                await cls.write_log(log_path, "="*60)
+                
+                # 逐个处理节点
+                for idx, node in enumerate(nodes, 1):
+                    await cls.write_log(log_path, f"\n[节点 {idx}/{total_nodes}] {node.ip}:{node.port or 22}")
+                    await cls.write_log(log_path, "-"*60)
+                    
+                    node_success = True
+                    
+                    # 执行各个步骤
+                    for step_idx, step in enumerate(steps, 1):
+                        # 计算总进度
+                        progress = int((idx - 1) / total_nodes * 100 + (step_idx / len(steps)) * (100 / total_nodes))
+                        await new_task_crud.update(
+                            id=task_id,
+                            data={"progress": min(progress, 99)}
+                        )
+                        await new_db.commit()
+                        
+                        await cls.write_log(log_path, f"  [{step_idx}/{len(steps)}] {step}...")
+                        await asyncio.sleep(random.uniform(0.3, 0.8))
+                        
+                        # 模拟随机失败
+                        if random.random() < failure_rate:
+                            node_success = False
+                            error_msg = f"执行 {step} 失败"
+                            await cls.write_log(log_path, f"  [ERROR] {error_msg}")
+                            failed_count += 1
+                            break
+                        
+                        await cls.write_log(log_path, f"  [✓] {step} 完成")
+                    
+                    if node_success:
+                        success_count += 1
+                        await cls.write_log(log_path, f"  [SUCCESS] 节点 {node.ip} 处理成功")
+                    else:
+                        await cls.write_log(log_path, f"  [FAILED] 节点 {node.ip} 处理失败")
+                
+                # 任务完成，更新最终状态
+                await cls.write_log(log_path, "="*60)
+                await cls.write_log(log_path, f"\n批次任务完成")
+                await cls.write_log(log_path, f"成功: {success_count}/{total_nodes}")
+                await cls.write_log(log_path, f"失败: {failed_count}/{total_nodes}")
+                
+                # 根据结果确定任务状态
+                if failed_count == 0:
+                    final_status = "success"
+                    await cls.write_log(log_path, "任务执行状态: 全部成功")
+                elif success_count == 0:
+                    final_status = "failed"
+                    await cls.write_log(log_path, "任务执行状态: 全部失败")
+                else:
+                    final_status = "partial_success"
+                    await cls.write_log(log_path, "任务执行状态: 部分成功")
+                
+                # 更新任务最终状态
+                await new_task_crud.update(
+                    id=task_id,
+                    data={
+                        "task_status": final_status,
+                        "progress": 100,
+                        "success_nodes": success_count,
+                        "failed_nodes": failed_count,
+                        "error_message": f"成功{success_count}个，失败{failed_count}个" if failed_count > 0 else None,
+                    }
+                )
+                await new_db.commit()
+                
+            except asyncio.CancelledError:
+                await new_db.rollback()
+                await cls.write_log(log_path, "批次任务被取消")
+                await new_task_crud.update(
+                    id=task_id,
+                    data={
+                        "task_status": "failed",
+                        "error_message": "任务被取消",
+                        "progress": 100,
+                        "success_nodes": success_count,
+                        "failed_nodes": failed_count,
+                    },
+                )
+                await new_db.commit()
+                raise
+            except Exception as exc:
+                await new_db.rollback()
+                await cls.write_log(log_path, f"批次任务执行异常: {exc}")
+                await new_task_crud.update(
+                    id=task_id,
+                    data={
+                        "task_status": "failed",
+                        "error_message": str(exc),
+                        "progress": 100,
+                        "success_nodes": success_count,
+                        "failed_nodes": failed_count,
+                    },
+                )
+                await new_db.commit()
+                logger.error(f"批次任务执行失败: {exc}")
 

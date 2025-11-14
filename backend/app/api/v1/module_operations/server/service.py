@@ -19,52 +19,66 @@ class ServerService:
 
     @classmethod
     async def get_server_detail_service(cls, auth: AuthSchema, id: int) -> Dict:
-        node = await ServerCRUD(auth).get_by_id_crud(id=id, preload=["service"])
+        node = await ServerCRUD(auth).get_by_id_crud(id=id, preload=["service", "services"])
         if not node:
             raise CustomException(msg="节点不存在")
         node_dict = ServerOutSchema.model_validate(node).model_dump()
         node_dict["service_name"] = node.service.name if node.service else None
-        # 返回关联的服务模块列表（用于前端显示）
-        # 注意：不直接序列化 node.service，因为 ServiceOutSchema 包含 nodes 字段，
-        # 需要预加载 nodes 关系，但在这个场景下我们不需要节点列表
-        if node.service:
-            # 手动构建服务数据，排除 nodes 字段，避免异步加载问题
-            service_dict = {
-                "id": node.service.id,
-                "name": node.service.name,
-                "code": node.service.code,
-                "status": node.service.status,
-                "description": node.service.description,
-                "project": node.service.project,
-                "module_group": node.service.module_group,
-                "created_at": node.service.created_at.isoformat() if node.service.created_at else None,
-                "updated_at": node.service.updated_at.isoformat() if node.service.updated_at else None,
-                "nodes": None,  # 不包含节点列表，避免异步加载问题
-            }
-            node_dict["services"] = [service_dict]
-        else:
-            node_dict["services"] = []
+        # 返回关联的服务模块列表（多对多关系）
+        services_list = []
+        if node.services:
+            for svc in node.services:
+                services_list.append({
+                    "id": svc.id,
+                    "name": svc.name,
+                    "code": svc.code,
+                    "status": svc.status,
+                    "description": svc.description,
+                    "project": svc.project,
+                    "module_group": svc.module_group,
+                    "created_at": svc.created_at.isoformat() if svc.created_at else None,
+                    "updated_at": svc.updated_at.isoformat() if svc.updated_at else None,
+                })
+        node_dict["services"] = services_list
         return node_dict
 
     @classmethod
     async def create_server_service(cls, auth: AuthSchema, data: ServerCreateSchema) -> Dict:
-        # 提取并排除service_ids字段（如果存在）
+        # 提取service_ids用于多对多关联
+        service_ids = data.service_ids or []
+        
+        # 排除service_ids字段创建节点
         data_dict = data.model_dump(exclude={'service_ids'}, exclude_unset=True)
         
-        # 如果提供了service_id，验证服务模块是否存在
+        # 检查IP+端口唯一性
+        port = data_dict.get('port') or 22
+        existing = await ServerCRUD(auth).get_list_crud(
+            search={"ip": data_dict['ip'], "port": port}
+        )
+        if existing:
+            raise CustomException(msg=f"创建失败，已存在IP {data_dict['ip']}:{port} 的节点")
+        
+        # 如果提供了主service_id，验证其存在性
         if data_dict.get('service_id'):
             service = await ServiceCRUD(auth).get_by_id_crud(id=data_dict['service_id'])
             if not service:
                 raise CustomException(msg="创建失败，服务模块不存在")
-
-            port = data_dict.get('port') or 22
-            existing = await ServerCRUD(auth).get_list_crud(
-                search={"service_id": data_dict['service_id'], "ip": data_dict['ip'], "port": port}
-            )
-            if existing:
-                raise CustomException(msg=f"创建失败，服务模块下已存在IP {data_dict['ip']}:{port} 的节点")
-
+        
+        # 创建节点
         node = await ServerCRUD(auth).create(data=data_dict)
+        
+        # 处理多对多关联
+        if service_ids:
+            services = []
+            for sid in service_ids:
+                service = await ServiceCRUD(auth).get_by_id_crud(id=sid)
+                if service:
+                    services.append(service)
+            node.services = services
+            # 刷新以加载关联数据（不提交，由外层统一管理事务）
+            await auth.db.flush()
+            await auth.db.refresh(node)
+        
         node_dict = ServerOutSchema.model_validate(node).model_dump()
         if node.service:
             node_dict["service_name"] = node.service.name
@@ -72,32 +86,23 @@ class ServerService:
 
     @classmethod
     async def update_server_service(cls, auth: AuthSchema, id: int, data: ServerUpdateSchema) -> Dict:
-        node = await ServerCRUD(auth).get_by_id_crud(id=id)
-        if not node:
-            raise CustomException(msg="更新失败，该节点不存在")
-
-        # 提取并排除service_ids字段（如果存在）
-        data_dict = data.model_dump(exclude={'service_ids'}, exclude_unset=True)
+        """
+        更新服务器节点
         
-        # 如果提供了service_id，验证服务模块是否存在
-        if data_dict.get('service_id'):
-            service = await ServiceCRUD(auth).get_by_id_crud(id=data_dict['service_id'])
-            if not service:
-                raise CustomException(msg="更新失败，服务模块不存在")
-
-        port = data_dict.get('port') or 22
-        ip = data_dict.get('ip') or node.ip
-        service_id = data_dict.get('service_id')
+        参数:
+        - auth (AuthSchema): 认证信息模型
+        - id (int): 节点ID
+        - data (ServerUpdateSchema): 节点更新模型
         
-        if service_id:
-            existing = await ServerCRUD(auth).get_list_crud(
-                search={"service_id": service_id, "ip": ip, "port": port}
-            )
-            existing = [item for item in existing if item.id != id]
-            if existing:
-                raise CustomException(msg=f"更新失败，服务模块下已存在IP {ip}:{port} 的节点")
-
-        node = await ServerCRUD(auth).update(id=id, data=data_dict)
+        返回:
+        - Dict: 节点详情字典
+        """
+        # 提取service_ids用于多对多关联
+        service_ids = data.service_ids
+        
+        # 调用CRUD层更新方法
+        node = await ServerCRUD(auth).update_with_services_crud(id=id, data=data, service_ids=service_ids)
+        
         node_dict = ServerOutSchema.model_validate(node).model_dump()
         if node.service:
             node_dict["service_name"] = node.service.name
@@ -133,6 +138,6 @@ class ServerService:
             order_by=order,
             search=search_dict,
             out_schema=ServerOutSchema,
-            preload=["service"],
+            preload=["service", "services"],
         )
 

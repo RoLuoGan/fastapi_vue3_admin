@@ -77,6 +77,8 @@
       >
         <el-table-column type="selection" width="55" align="center" />
         <el-table-column type="index" label="#" width="60" />
+        <el-table-column prop="project" label="项目" min-width="120" />
+        <el-table-column prop="module_group" label="模块分组" min-width="120" />
         <el-table-column prop="name" label="服务名称" min-width="160" />
         <el-table-column prop="code" label="服务编码" min-width="140" />
         <el-table-column prop="status" label="状态" width="100">
@@ -217,7 +219,14 @@
             />
           </el-form-item>
           <el-form-item label="关联服务器" prop="nodes">
-            <el-select v-model="serviceForm.nodes" multiple placeholder="请选择关联的服务器" clearable style="width: 100%">
+            <el-select 
+              v-model="serviceForm.nodes" 
+              multiple 
+              filterable 
+              placeholder="请选择关联的服务器" 
+              clearable 
+              style="width: 100%"
+            >
               <el-option v-for="node in nodeOptions" :key="node.id" :label="`${node.ip}:${node.port}`" :value="node.id" />
             </el-select>
           </el-form-item>

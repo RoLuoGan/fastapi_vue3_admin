@@ -48,14 +48,18 @@ class ServerOutSchema(ServerCreateSchema, BaseSchema):
     model_config = {"from_attributes": True}
 
     service_name: Optional[str] = Field(default=None, description="服务模块名称")
+    services: Optional[List[Dict[str, Any]]] = Field(default=None, description="关联的服务模块列表")
 
     @model_validator(mode="before")
     @classmethod
-    def fill_service_name(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+    def fill_service_info(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        from sqlalchemy.inspection import inspect as sa_inspect
+        
         if values is None:
             return values
         if not isinstance(values, dict):
-            attr_names = [
+            # 基本属性（不触发懒加载）
+            basic_attrs = [
                 "id",
                 "service_id",
                 "ip",
@@ -67,14 +71,58 @@ class ServerOutSchema(ServerCreateSchema, BaseSchema):
                 "tags",
                 "created_at",
                 "updated_at",
-                "service",
             ]
-            values = {name: getattr(values, name, None) for name in attr_names}
+            values_dict = {name: getattr(values, name, None) for name in basic_attrs}
+            
+            # 安全地获取关联属性（仅当已加载时）
+            try:
+                # 检查对象是否有 inspect state
+                state = sa_inspect(values)
+                
+                # 检查 service 是否已加载
+                if "service" not in state.unloaded:
+                    values_dict["service"] = getattr(values, "service", None)
+                else:
+                    values_dict["service"] = None
+                
+                # 检查 services 是否已加载
+                if "services" not in state.unloaded:
+                    values_dict["services"] = getattr(values, "services", None)
+                else:
+                    values_dict["services"] = None
+            except:
+                # 如果检查失败，使用 __dict__ 获取已加载的属性
+                if hasattr(values, "__dict__"):
+                    values_dict["service"] = values.__dict__.get("service", None)
+                    values_dict["services"] = values.__dict__.get("services", None)
+            
+            values = values_dict
+        
+        # 填充单一service_name（向后兼容）
         service = values.get("service")
         if service and not values.get("service_name"):
             if isinstance(service, dict):
                 values["service_name"] = service.get("name")
             else:
                 values["service_name"] = getattr(service, "name", None)
+        
+        # 填充services列表
+        services = values.get("services")
+        if services:
+            services_list = []
+            for svc in services:
+                if isinstance(svc, dict):
+                    services_list.append(svc)
+                else:
+                    services_list.append({
+                        "id": getattr(svc, "id", None),
+                        "name": getattr(svc, "name", None),
+                        "code": getattr(svc, "code", None),
+                        "status": getattr(svc, "status", None),
+                        "project": getattr(svc, "project", None),
+                        "module_group": getattr(svc, "module_group", None),
+                    })
+            values["services"] = services_list
+        
         return values
 

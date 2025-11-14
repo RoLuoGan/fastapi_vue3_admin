@@ -25,31 +25,35 @@ class ServiceService:
         order_by: Optional[List[Dict]] = None,
     ) -> List[Dict]:
         search_dict = search or {}
-        service_list = await ServiceCRUD(auth).get_list_crud(search=search_dict, order_by=order_by)
+        service_list = await ServiceCRUD(auth).get_list_crud(
+            search=search_dict, 
+            order_by=order_by,
+            preload=["nodes"]
+        )
         result: List[Dict] = []
         for service in service_list:
             service_dict = ServiceOutSchema.model_validate(service).model_dump()
-            # 只返回有service_id的节点（过滤掉没有关联服务模块的节点）
-            nodes = [
-                ServerOutSchema.model_validate(node).model_dump()
-                for node in service.nodes
-                if node.service_id == service.id
-            ]
+            # 返回所有关联的节点（使用多对多关系），但排除节点中的services字段以避免循环引用
+            nodes = []
+            for node in service.nodes:
+                node_dict = ServerOutSchema.model_validate(node).model_dump()
+                # 移除services字段以避免循环引用
+                node_dict.pop("services", None)
+                nodes.append(node_dict)
             service_dict["nodes"] = nodes
             result.append(service_dict)
         return result
 
     @classmethod
     async def get_service_detail_service(cls, auth: AuthSchema, id: int) -> Dict:
-        service = await ServiceCRUD(auth).get_by_id_crud(id=id)
+        service = await ServiceCRUD(auth).get_by_id_crud(id=id, preload=["nodes"])
         if not service:
             raise CustomException(msg="服务模块不存在")
         service_dict = ServiceOutSchema.model_validate(service).model_dump()
-        # 只返回有service_id的节点（过滤掉没有关联服务模块的节点）
+        # 返回所有关联的节点（使用多对多关系）
         service_dict["nodes"] = [
             ServerOutSchema.model_validate(node).model_dump()
             for node in service.nodes
-            if node.service_id == service.id
         ]
         return service_dict
 
@@ -73,7 +77,7 @@ class ServiceService:
             order_by=order,
             search=search_dict,
             out_schema=ServiceOutSchema,
-            preload=None,
+            preload=["nodes"],
         )
 
     @classmethod
@@ -88,47 +92,41 @@ class ServiceService:
         
         service = await ServiceCRUD(auth).create(data=data_dict)
         
-        # 更新关联节点的service_id
+        # 更新多对多关联节点
         if node_ids:
             from ..server.crud import ServerCRUD
+            nodes = []
             for node_id in node_ids:
-                node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
+                node = await ServerCRUD(auth).get_by_id_crud(id=node_id, preload=["services"])
                 if node:
-                    await ServerCRUD(auth).update(id=node_id, data={"service_id": service.id})
+                    nodes.append(node)
+            service.nodes = nodes
+            # 刷新以加载关联数据（不提交，由外层统一管理事务）
+            await auth.db.flush()
+            await auth.db.refresh(service)
         
         return ServiceOutSchema.model_validate(service).model_dump()
 
     @classmethod
     async def update_service_service(cls, auth: AuthSchema, id: int, data: ServiceUpdateSchema) -> Dict:
-        service = await ServiceCRUD(auth).get_by_id_crud(id=id)
-        if not service:
-            raise CustomException(msg="更新失败，该服务模块不存在")
-        exist_service = await ServiceCRUD(auth).get(name=data.name)
-        if exist_service and exist_service.id != id:
-            raise CustomException(msg="更新失败，服务模块名称重复")
+        """
+        更新服务模块
         
+        参数:
+        - auth (AuthSchema): 认证信息模型
+        - id (int): 服务模块ID
+        - data (ServiceUpdateSchema): 服务模块更新模型
+        
+        返回:
+        - Dict: 服务模块详情字典
+        """
         # 提取节点ID列表
         node_ids = getattr(data, 'node_ids', None)
-        data_dict = data.model_dump(exclude={'node_ids'})
         
-        updated = await ServiceCRUD(auth).update(id=id, data=data_dict)
+        # 调用CRUD层更新方法
+        service = await ServiceCRUD(auth).update_with_nodes_crud(id=id, data=data, node_ids=node_ids)
         
-        # 更新关联节点的service_id
-        if node_ids is not None:
-            from ..server.crud import ServerCRUD
-            # 先清除该服务模块下所有节点的关联
-            existing_nodes = await ServerCRUD(auth).get_list_crud(search={"service_id": id})
-            for node in existing_nodes:
-                if node.id not in node_ids:
-                    await ServerCRUD(auth).update(id=node.id, data={"service_id": None})
-            
-            # 更新新关联节点的service_id
-            for node_id in node_ids:
-                node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
-                if node:
-                    await ServerCRUD(auth).update(id=node_id, data={"service_id": id})
-        
-        return ServiceOutSchema.model_validate(updated).model_dump()
+        return ServiceOutSchema.model_validate(service).model_dump()
 
     @classmethod
     async def delete_service_service(cls, auth: AuthSchema, ids: List[int]) -> None:

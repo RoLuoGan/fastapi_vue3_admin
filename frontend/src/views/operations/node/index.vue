@@ -51,15 +51,6 @@
             <div class="data-table__toolbar--left">
               <el-row :gutter="10">
                 <el-col :span="1.5">
-                  <el-button v-hasPerm="['operations:node:create']" type="success" icon="plus" @click="handleOpenServiceDialog('create')">新增服务</el-button>
-                </el-col>
-                <el-col :span="1.5">
-                  <el-button v-hasPerm="['operations:node:create']" type="primary" icon="plus" @click="handleOpenNodeDialog('create')">新增节点</el-button>
-                </el-col>
-                <el-col :span="1.5">
-                  <el-button v-hasPerm="['operations:node:delete']" type="danger" icon="delete" :disabled="selectNodeIds.length === 0" @click="handleDeleteNode(selectNodeIds)">批量删除</el-button>
-                </el-col>
-                <el-col :span="1.5">
                   <el-button v-hasPerm="['operations:node:deploy']" type="warning" icon="Upload" :disabled="selectNodeIds.length === 0" @click="handleDeploy">部署</el-button>
                 </el-col>
                 <el-col :span="1.5">
@@ -89,25 +80,43 @@
             height="600" 
             border 
             stripe 
-            @select="handleSelect"
-            @select-all="handleSelectAll"
-            @selection-change="handleSelectionChange"
           >
             <template #empty>
               <el-empty :image-size="80" description="暂无数据" />
             </template>
-            <el-table-column type="selection" min-width="55" align="center" />
+            <!-- 自定义多选列：使用 checkbox 实现级联选择/半选状态 -->
+            <el-table-column label="选择" width="80" align="center">
+              <template #default="{ row }">
+                <el-checkbox
+                  :model-value="checkedMap[row.id] === true"
+                  :indeterminate="indeterminateMap[row.id] === true"
+                  @change="(val) => onCheckboxChange(row, !!val)"
+                />
+              </template>
+            </el-table-column>
             <el-table-column type="index" fixed label="序号" min-width="60" />
+            <el-table-column label="项目" prop="project" min-width="120">
+              <template #default="scope">
+                <span v-if="scope.row.nodes">{{ scope.row.project || '-' }}</span>
+                <span v-else>{{ scope.row.project || '-' }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="模块分组" prop="module_group" min-width="120">
+              <template #default="scope">
+                <span v-if="scope.row.nodes">{{ scope.row.module_group || '-' }}</span>
+                <span v-else>{{ scope.row.module_group || '-' }}</span>
+              </template>
+            </el-table-column>
             <el-table-column label="名称/IP" prop="name" min-width="180">
               <template #default="scope">
                 <span v-if="scope.row.nodes">{{ scope.row.name }}</span>
                 <span v-else>{{ scope.row.ip }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="编码/端口" prop="code" min-width="100">
+            <el-table-column label="端口" prop="port" min-width="80">
               <template #default="scope">
-                <span v-if="scope.row.nodes">{{ scope.row.code || '-' }}</span>
-                <span v-else>{{ scope.row.port || '-' }}</span>
+                <span v-if="!scope.row.nodes">{{ scope.row.port || '-' }}</span>
+                <span v-else>-</span>
               </template>
             </el-table-column>
             <el-table-column label="状态" prop="status" min-width="80">
@@ -119,16 +128,6 @@
             </el-table-column>
             <el-table-column label="描述" prop="description" min-width="150" show-overflow-tooltip />
             <el-table-column label="创建时间" prop="created_at" min-width="180" />
-            <el-table-column fixed="right" label="操作" align="center" min-width="200">
-              <template #default="scope">
-                <el-button v-if="scope.row.nodes" v-hasPerm="['operations:node:detail']" type="info" size="small" link icon="document" @click="handleOpenServiceDialog('detail', scope.row.id)">详情</el-button>
-                <el-button v-if="scope.row.nodes" v-hasPerm="['operations:node:update']" type="primary" size="small" link icon="edit" @click="handleOpenServiceDialog('update', scope.row.id)">编辑</el-button>
-                <el-button v-if="scope.row.nodes" v-hasPerm="['operations:node:delete']" type="danger" size="small" link icon="delete" @click="handleDeleteService([scope.row.id])">删除</el-button>
-                <el-button v-if="!scope.row.nodes" v-hasPerm="['operations:node:detail']" type="info" size="small" link icon="document" @click="handleOpenNodeDialog('detail', scope.row.id)">详情</el-button>
-                <el-button v-if="!scope.row.nodes" v-hasPerm="['operations:node:update']" type="primary" size="small" link icon="edit" @click="handleOpenNodeDialog('update', scope.row.id)">编辑</el-button>
-                <el-button v-if="!scope.row.nodes" v-hasPerm="['operations:node:delete']" type="danger" size="small" link icon="delete" @click="handleDeleteNode([scope.row.id])">删除</el-button>
-              </template>
-            </el-table-column>
           </el-table>
         </el-card>
       </div>
@@ -151,8 +150,7 @@
             >
               <div class="task-header">
                 <div>
-                  <span class="task-ip">{{ task.ip }}</span>
-                  <span class="task-service">{{ task.service_name || '-' }}</span>
+                  <span class="task-ip">任务 #{{ task.id }}</span>
                 </div>
                 <el-tag size="small" :type="task.task_type === 'deploy' ? 'success' : 'warning'">
                   {{ task.task_type === 'deploy' ? '部署' : '重启' }}
@@ -190,13 +188,15 @@
       <template v-if="serviceDialogVisible.type === 'detail'">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="服务名称" :span="2">{{ serviceDetailFormData.name }}</el-descriptions-item>
+          <el-descriptions-item label="项目">{{ serviceDetailFormData.project || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="模块分组">{{ serviceDetailFormData.module_group || '-' }}</el-descriptions-item>
           <el-descriptions-item label="服务编码">{{ serviceDetailFormData.code || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag v-if="serviceDetailFormData.status" type="success">启用</el-tag>
             <el-tag v-else type="danger">停用</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="描述" :span="2">{{ serviceDetailFormData.description || '-' }}</el-descriptions-item>
           <el-descriptions-item label="创建时间" :span="2">{{ serviceDetailFormData.created_at }}</el-descriptions-item>
+          <el-descriptions-item label="描述" :span="2">{{ serviceDetailFormData.description || '-' }}</el-descriptions-item>
         </el-descriptions>
       </template>
       <template v-else>
@@ -207,14 +207,28 @@
           <el-form-item label="服务编码" prop="code">
             <el-input v-model="serviceFormData.code" placeholder="请输入服务编码" :maxlength="50" />
           </el-form-item>
+          <el-form-item label="运维管理项目" prop="project">
+            <el-select v-model="serviceFormData.project" placeholder="请选择运维管理项目" clearable style="width: 100%">
+              <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="模块分组" prop="module_group">
+            <el-select v-model="serviceFormData.module_group" placeholder="请选择模块分组" clearable style="width: 100%">
+              <el-option v-for="item in moduleGroupOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="状态" prop="status">
-            <el-radio-group v-model="serviceFormData.status">
-              <el-radio :value="true">启用</el-radio>
-              <el-radio :value="false">停用</el-radio>
-            </el-radio-group>
+            <el-switch
+              v-model="serviceFormData.status"
+              inline-prompt
+              active-text="启用"
+              inactive-text="停用"
+              :active-value="true"
+              :inactive-value="false"
+            />
           </el-form-item>
           <el-form-item label="描述" prop="description">
-            <el-input v-model="serviceFormData.description" :rows="4" type="textarea" placeholder="请输入描述" />
+            <el-input v-model="serviceFormData.description" :rows="4" type="textarea" placeholder="请输入描述" :maxlength="255" show-word-limit />
           </el-form-item>
         </el-form>
       </template>
@@ -231,15 +245,18 @@
     <el-dialog v-model="nodeDialogVisible.visible" :title="nodeDialogVisible.title" @close="handleCloseNodeDialog">
       <template v-if="nodeDialogVisible.type === 'detail'">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="服务名称">{{ nodeDetailFormData.service_name }}</el-descriptions-item>
+          <el-descriptions-item label="服务名称" :span="2">{{ nodeDetailFormData.service_name }}</el-descriptions-item>
           <el-descriptions-item label="节点IP">{{ nodeDetailFormData.ip }}</el-descriptions-item>
           <el-descriptions-item label="端口">{{ nodeDetailFormData.port || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="运维管理项目">{{ nodeDetailFormData.project || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="机房">{{ nodeDetailFormData.idc || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="服务器标签">{{ nodeDetailFormData.tags || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag v-if="nodeDetailFormData.status" type="success">启用</el-tag>
             <el-tag v-else type="danger">停用</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="描述" :span="2">{{ nodeDetailFormData.description || '-' }}</el-descriptions-item>
           <el-descriptions-item label="创建时间" :span="2">{{ nodeDetailFormData.created_at }}</el-descriptions-item>
+          <el-descriptions-item label="描述" :span="2">{{ nodeDetailFormData.description || '-' }}</el-descriptions-item>
         </el-descriptions>
       </template>
       <template v-else>
@@ -255,14 +272,33 @@
           <el-form-item label="端口" prop="port">
             <el-input-number v-model="nodeFormData.port" controls-position="right" :min="1" :max="65535" :value="nodeFormData.port || 22" style="width: 100%" />
           </el-form-item>
+          <el-form-item label="运维管理项目" prop="project">
+            <el-select v-model="nodeFormData.project" placeholder="请选择运维管理项目" clearable style="width: 100%">
+              <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="机房" prop="idc">
+            <el-select v-model="nodeFormData.idc" placeholder="请选择机房" clearable style="width: 100%">
+              <el-option v-for="item in idcOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="服务器标签" prop="tags">
+            <el-select v-model="nodeFormData.tags" placeholder="请选择服务器标签" clearable style="width: 100%">
+              <el-option v-for="item in tagsOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="状态" prop="status">
-            <el-radio-group v-model="nodeFormData.status">
-              <el-radio :value="true">启用</el-radio>
-              <el-radio :value="false">停用</el-radio>
-            </el-radio-group>
+            <el-switch
+              v-model="nodeFormData.status"
+              inline-prompt
+              active-text="启用"
+              inactive-text="停用"
+              :active-value="true"
+              :inactive-value="false"
+            />
           </el-form-item>
           <el-form-item label="描述" prop="description">
-            <el-input v-model="nodeFormData.description" :rows="4" type="textarea" placeholder="请输入描述" />
+            <el-input v-model="nodeFormData.description" :rows="4" type="textarea" placeholder="请输入描述" :maxlength="255" show-word-limit />
           </el-form-item>
         </el-form>
       </template>
@@ -298,6 +334,16 @@ const selectIds = ref<number[]>([]);
 const selectNodeIds = ref<number[]>([]);
 const loading = ref(false);
 
+// 保存每个节点的选中 / 半选状态（使用 ref 包装对象，减少响应式开销）
+const checkedMap = ref<Record<number, boolean>>({});
+const indeterminateMap = ref<Record<number, boolean>>({});
+// 父节点映射：nodeId -> parentId（不需要响应式）
+const parentMap: Record<number, number | null> = {};
+// 节点缓存：nodeId -> node（避免重复查找，不需要响应式）
+const nodeMap: Record<number, any> = {};
+// 子节点映射：nodeId -> childIds（不需要响应式）
+const childrenMap: Record<number, number[]> = {};
+
 // 分页表单
 const pageTableData = ref<ServiceTable[]>([]);
 
@@ -326,6 +372,9 @@ const nodeFormData = reactive<NodeForm>({
   port: 22,
   status: true,
   description: undefined,
+  project: undefined,
+  idc: undefined,
+  tags: undefined,
 });
 
 // 服务模块弹窗状态
@@ -356,6 +405,8 @@ const router = useRouter();
 // 字典选项
 const projectOptions = ref<any[]>([]);
 const moduleGroupOptions = ref<any[]>([]);
+const idcOptions = ref<any[]>([]);
+const tagsOptions = ref<any[]>([]);
 
 // 表单验证规则
 const serviceRules = reactive({
@@ -370,64 +421,101 @@ const nodeRules = reactive({
   ],
 });
 
-// 选择行（单行选择）
-async function handleSelect(selection: any[], row: any) {
-  if (row.nodes) {
-    // 如果选择的是服务模块，选中该模块下的所有节点
-    const isSelected = selection.some((item: any) => item.id === row.id);
-    if (isSelected) {
-      // 选中该模块下的所有节点
-      row.nodes?.forEach((node: any) => {
-        dataTableRef.value?.toggleRowSelection(node, true);
-      });
+// 构建映射关系和初始化状态（一次性建立所有缓存）
+function buildMaps(list: any[], parentId: number | null = null) {
+  for (const node of list) {
+    // 缓存节点
+    nodeMap[node.id] = node;
+    // 设置父节点
+    parentMap[node.id] = parentId;
+    // 初始化选中状态
+    checkedMap.value[node.id] = false;
+    indeterminateMap.value[node.id] = false;
+    
+    // 缓存子节点ID列表
+    if (node.nodes && node.nodes.length) {
+      childrenMap[node.id] = node.nodes.map((c: any) => c.id);
+      buildMaps(node.nodes, node.id);
     } else {
-      // 取消选择时，取消该模块下所有节点的选择
-      row.nodes?.forEach((node: any) => {
-        dataTableRef.value?.toggleRowSelection(node, false);
-      });
+      childrenMap[node.id] = [];
     }
   }
-  await updateSelectionState();
 }
 
-// 全选
-async function handleSelectAll(selection: any[]) {
-  // 如果是全选，需要展开所有节点
-  if (selection.length > 0) {
-    // 遍历所有服务模块，选中其下的所有节点
-    pageTableData.value.forEach((service: any) => {
-      if (service.nodes && service.nodes.length > 0) {
-        service.nodes.forEach((node: any) => {
-          dataTableRef.value?.toggleRowSelection(node, true);
-        });
-      }
-    });
+// 获取所有后代 id（包含自己）- 使用迭代避免递归
+function collectDescendantIds(nodeId: number): number[] {
+  const result: number[] = [];
+  const stack = [nodeId];
+  
+  while (stack.length > 0) {
+    const currentId = stack.pop()!;
+    result.push(currentId);
+    
+    const childIds = childrenMap[currentId] || [];
+    // 将子节点加入栈中
+    for (let i = childIds.length - 1; i >= 0; i--) {
+      stack.push(childIds[i]);
+    }
   }
-  await updateSelectionState();
+  
+  return result;
 }
 
-// 行选中变化（保留此函数用于其他可能的监听）
-function handleSelectionChange() {
+// 当 checkbox 改变时：级联到子节点，并回溯更新父节点的状态
+function onCheckboxChange(row: any, checked: boolean) {
+  const nodeId = row.id;
+  if (!nodeMap[nodeId]) return;
+
+  // 1) 级联到所有后代（使用迭代，避免递归）
+  const descendantIds = collectDescendantIds(nodeId);
+  for (const id of descendantIds) {
+    checkedMap[id] = checked;
+    indeterminateMap[id] = false;
+  }
+
+  // 2) 回溯更新父节点：查看父的子节点是否全部选中/部分/未选
+  let parentId = parentMap[nodeId];
+  while (parentId != null) {
+    const childIds = childrenMap[parentId] || [];
+    const allChecked = childIds.every((id) => checkedMap[id] === true);
+    const noneChecked = childIds.every((id) => checkedMap[id] === false && indeterminateMap[id] === false);
+
+    if (allChecked) {
+      checkedMap[parentId] = true;
+      indeterminateMap[parentId] = false;
+    } else if (noneChecked) {
+      checkedMap[parentId] = false;
+      indeterminateMap[parentId] = false;
+    } else {
+      checkedMap[parentId] = false;
+      indeterminateMap[parentId] = true;
+    }
+
+    parentId = parentMap[parentId];
+  }
+
+  // 3) 更新选中状态
   updateSelectionState();
 }
 
-async function updateSelectionState() {
-  await nextTick();
-  const selection =
-    (typeof dataTableRef.value?.getSelectionRows === "function" && dataTableRef.value.getSelectionRows()) || [];
-  selectIds.value = selection.map((item: any) => item.id);
+// 更新选中状态（提取选中的节点ID）
+function updateSelectionState() {
+  // 获取所有选中的 id
+  const selectedIds = Object.keys(checkedMap)
+    .filter((id) => checkedMap[Number(id)] === true)
+    .map((id) => Number(id));
+  
+  selectIds.value = selectedIds;
+  
+  // 提取所有选中的节点ID（排除服务模块，只取叶子节点）
   const nodeIdSet = new Set<number>();
-  selection.forEach((item: any) => {
-    if (item?.nodes && Array.isArray(item.nodes)) {
-      item.nodes.forEach((node: any) => {
-        if (node?.id) {
-          nodeIdSet.add(node.id);
-        }
-      });
-    } else if (!item?.nodes && item?.id) {
-      nodeIdSet.add(item.id);
+  for (const id of selectedIds) {
+    const node = nodeMap[id];
+    // 如果没有 nodes 属性或子节点为空，说明是叶子节点
+    if (node && (!node.nodes || node.nodes.length === 0)) {
+      nodeIdSet.add(id);
     }
-  });
+  }
   selectNodeIds.value = Array.from(nodeIdSet);
 }
 
@@ -445,6 +533,17 @@ async function loadingData() {
       return service;
     });
     pageTableData.value = processedData;
+    
+    // 清空旧的缓存
+    Object.keys(nodeMap).forEach(key => delete nodeMap[Number(key)]);
+    Object.keys(parentMap).forEach(key => delete parentMap[Number(key)]);
+    Object.keys(childrenMap).forEach(key => delete childrenMap[Number(key)]);
+    Object.keys(checkedMap).forEach(key => delete checkedMap[Number(key)]);
+    Object.keys(indeterminateMap).forEach(key => delete indeterminateMap[Number(key)]);
+    
+    // 构建所有映射关系
+    buildMaps(pageTableData.value);
+    
     // 同时加载服务选项
     await loadServiceOptions();
   } catch (error: any) {
@@ -467,12 +566,16 @@ async function loadServiceOptions() {
 // 加载字典选项
 async function loadDictOptions() {
   try {
-    const [projectRes, moduleGroupRes] = await Promise.all([
+    const [projectRes, moduleGroupRes, idcRes, tagsRes] = await Promise.all([
       DictAPI.getInitDict("operations_project"),
       DictAPI.getInitDict("operations_module_group"),
+      DictAPI.getInitDict("operations_idc"),
+      DictAPI.getInitDict("operations_server_tags"),
     ]);
     projectOptions.value = projectRes.data.data || [];
     moduleGroupOptions.value = moduleGroupRes.data.data || [];
+    idcOptions.value = idcRes.data.data || [];
+    tagsOptions.value = tagsRes.data.data || [];
   } catch (error: any) {
     console.error(error);
   }
@@ -550,6 +653,8 @@ async function handleOpenServiceDialog(type: 'create' | 'update' | 'detail', id?
     serviceFormData.code = '';
     serviceFormData.status = true;
     serviceFormData.description = undefined;
+    serviceFormData.project = undefined;
+    serviceFormData.module_group = undefined;
   }
   serviceDialogVisible.visible = true;
 }
@@ -605,6 +710,9 @@ async function handleOpenNodeDialog(type: 'create' | 'update' | 'detail', id?: n
     nodeFormData.port = 22;
     nodeFormData.status = true;
     nodeFormData.description = undefined;
+    nodeFormData.project = undefined;
+    nodeFormData.idc = undefined;
+    nodeFormData.tags = undefined;
   }
   nodeDialogVisible.visible = true;
 }
@@ -906,4 +1014,5 @@ onBeforeUnmount(() => {
   padding: 40px 0;
 }
 </style>
+
 

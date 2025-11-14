@@ -97,9 +97,10 @@ class TaskLogSchema(BaseModel):
     content: str = Field(default="", description="日志内容")
 
 
-class NodeIdsSchema(BaseModel):
-    """节点ID列表模型"""
+class ExecuteTaskSchema(BaseModel):
+    """执行任务模型"""
     node_ids: List[int] = Field(..., description="节点ID列表", min_length=1)
+    task_type: str = Field(..., description="任务类型: deploy(部署) 或 restart(重启)", pattern="^(deploy|restart)$")
 
 
 from ..server.schema import ServerOutSchema  # noqa: E402  # 解决前向引用
