@@ -98,10 +98,7 @@ class TaskService:
         
         task = await task_crud.create(data=task_data)
         
-        # 写入初始日志
-        await TaskExecutor.write_log(log_path, f"批次任务创建成功，共 {len(nodes)} 个节点")
-        for idx, node in enumerate(nodes, 1):
-            await TaskExecutor.write_log(log_path, f"  {idx}. {node.ip}:{node.port or 22}")
+        # 不在这里写入初始日志，让脚本统一输出初始化信息和树形结构的日志
         
         await auth.db.commit()
         return {"task": task, "log_path": log_path, "nodes": nodes}
