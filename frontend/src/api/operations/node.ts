@@ -132,9 +132,23 @@ const NodeAPI = {
 
   // 统一的任务执行接口（新格式：支持多模块多节点）
   executeTask(data: ExecuteTaskRequest) {
+    console.log('========== NodeAPI.executeTask ==========');
     console.log('[NodeAPI.executeTask] 接收到的数据:', data);
     console.log('[NodeAPI.executeTask] 数据类型:', typeof data);
-    console.log('[NodeAPI.executeTask] 数据JSON:', JSON.stringify(data, null, 2));
+    console.log('[NodeAPI.executeTask] 任务类型:', data.task_type);
+    console.log('[NodeAPI.executeTask] 操作类型:', data.operator_type);
+    console.log('[NodeAPI.executeTask] 模块数量:', data.operator_metas?.length || 0);
+    
+    if (data.operator_metas && Array.isArray(data.operator_metas)) {
+      data.operator_metas.forEach((meta, idx) => {
+        console.log(`[NodeAPI.executeTask] 模块 ${idx + 1}: 服务ID=${meta.service_id}, 节点ID列表=[${meta.node_ids.join(', ')}], 节点数量=${meta.node_ids.length}`);
+      });
+    }
+    
+    console.log('[NodeAPI.executeTask] 完整请求数据 (JSON):');
+    console.log(JSON.stringify(data, null, 2));
+    console.log('==========================================');
+    
     return request<ApiResponse>({
       url: `${API_PATH}/execute`,
       method: "post",
@@ -144,6 +158,7 @@ const NodeAPI = {
 
   // 部署（使用统一接口）
   deploy(data: ExecuteTaskRequest) {
+    console.log('[NodeAPI.deploy] 开始部署操作');
     console.log('[NodeAPI.deploy] 接收到的数据:', data);
     return this.executeTask(data);
   },

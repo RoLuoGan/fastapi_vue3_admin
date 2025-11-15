@@ -1001,25 +1001,41 @@ async function handleDeleteService(ids: number[]) {
 function buildOperatorMetas(nodeIds: number[]): OperatorMeta[] {
   const metaMap = new Map<number, number[]>();
   
+  // 获取当前真正选中的行（使用 getSelectionRows 确保准确性）
+  const currentSelection = dataTableRef.value?.getSelectionRows() || [];
+  
+  // 使用 getRowKey 来匹配节点，避免 ID 冲突问题
+  const selectedRowKeys = new Set(currentSelection.map((row: any) => getRowKey(row)));
+  
+  console.log('[buildOperatorMetas] 当前选中的行数:', currentSelection.length);
+  console.log('[buildOperatorMetas] 选中的行Key列表:', Array.from(selectedRowKeys));
+  
   // 遍历所有服务模块
   pageTableData.value.forEach((service: any) => {
     if (service.nodes && Array.isArray(service.nodes)) {
-      // 找出属于该服务的选中节点
+      // 找出属于该服务的选中节点（使用 getRowKey 匹配，避免 ID 冲突）
       const serviceNodeIds = service.nodes
-        .filter((node: any) => nodeIds.includes(node.id))
+        .filter((node: any) => {
+          const nodeKey = getRowKey(node);
+          return selectedRowKeys.has(nodeKey);
+        })
         .map((node: any) => node.id);
       
       if (serviceNodeIds.length > 0) {
         metaMap.set(service.id, serviceNodeIds);
+        console.log(`[buildOperatorMetas] 服务 ${service.name} (ID: ${service.id}) 包含 ${serviceNodeIds.length} 个选中节点: [${serviceNodeIds.join(', ')}]`);
       }
     }
   });
   
   // 转换为数组格式
-  return Array.from(metaMap.entries()).map(([service_id, node_ids]) => ({
+  const result = Array.from(metaMap.entries()).map(([service_id, node_ids]) => ({
     service_id,
     node_ids
   }));
+  
+  console.log('[buildOperatorMetas] 最终生成的操作元数据:', result);
+  return result;
 }
 
 // 部署
@@ -1029,9 +1045,36 @@ async function handleDeploy() {
     return;
   }
   
+  console.log('========== 部署操作请求 ==========');
+  console.log('[部署] 选中的节点ID列表:', selectNodeIds.value);
+  console.log('[部署] 选中的节点数量:', selectNodeIds.value.length);
+  
+  // 打印选中节点的详细信息
+  const selectedNodes: any[] = [];
+  pageTableData.value.forEach((service: any) => {
+    if (service.nodes && Array.isArray(service.nodes)) {
+      service.nodes.forEach((node: any) => {
+        if (selectNodeIds.value.includes(node.id)) {
+          selectedNodes.push({
+            node_id: node.id,
+            node_ip: node.ip,
+            node_port: node.port,
+            service_id: service.id,
+            service_name: service.name,
+            composite_id: node.composite_id
+          });
+        }
+      });
+    }
+  });
+  console.log('[部署] 选中的节点详情:', selectedNodes);
+  
   // 构建操作元数据
   const operatorMetas = buildOperatorMetas(selectNodeIds.value);
-  console.log('[部署] 操作元数据:', operatorMetas);
+  console.log('[部署] 操作元数据 (按服务分组):', operatorMetas);
+  operatorMetas.forEach((meta, idx) => {
+    console.log(`  模块 ${idx + 1}: 服务ID=${meta.service_id}, 节点ID列表=[${meta.node_ids.join(', ')}], 节点数量=${meta.node_ids.length}`);
+  });
   
   ElMessageBox.confirm("确认部署选中的节点?", "提示", {
     confirmButtonText: "确定",
@@ -1046,7 +1089,9 @@ async function handleDeploy() {
         operator_type: 'deploy',
         operator_metas: operatorMetas
       };
-      console.log('[部署] 准备发送的请求数据:', JSON.stringify(requestData, null, 2));
+      console.log('[部署] 准备发送的请求数据 (JSON格式):');
+      console.log(JSON.stringify(requestData, null, 2));
+      console.log('==========================================');
       await NodeAPI.deploy(requestData);
       console.log('[部署] 请求发送成功');
       // 响应拦截器已经自动显示成功消息，这里不需要重复显示
