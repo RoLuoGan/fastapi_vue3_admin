@@ -26,6 +26,7 @@
           <el-select v-model="queryFormData.task_status" placeholder="全部" clearable>
             <el-option label="执行中" value="running" />
             <el-option label="成功" value="success" />
+            <el-option label="部分成功" value="partial_success" />
             <el-option label="失败" value="failed" />
           </el-select>
         </el-form-item>
@@ -282,6 +283,8 @@ function statusLabel(status?: string) {
       return "执行中";
     case "success":
       return "成功";
+    case "partial_success":
+      return "部分成功";
     case "failed":
       return "失败";
     default:
@@ -295,6 +298,8 @@ function statusTag(status?: string) {
       return "warning";
     case "success":
       return "success";
+    case "partial_success":
+      return "warning";
     case "failed":
       return "danger";
     default:
@@ -304,6 +309,7 @@ function statusTag(status?: string) {
 
 function progressStatus(status?: string) {
   if (status === "success") return "success";
+  if (status === "partial_success") return "warning";
   if (status === "failed") return "exception";
   return undefined;
 }

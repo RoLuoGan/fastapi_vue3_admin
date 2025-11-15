@@ -56,6 +56,12 @@
                 <el-col :span="1.5">
                   <el-button v-hasPerm="['operations:node:restart']" type="info" icon="RefreshRight" :disabled="selectNodeIds.length === 0" @click="handleRestart">重启</el-button>
                 </el-col>
+                <el-col :span="1.5">
+                  <el-button type="primary" icon="ArrowDown" plain @click="handleExpandAll">全部展开</el-button>
+                </el-col>
+                <el-col :span="1.5">
+                  <el-button type="primary" icon="ArrowUp" plain @click="handleCollapseAll">全部折叠</el-button>
+                </el-col>
               </el-row>
             </div>
             <div class="data-table__toolbar--right">
@@ -162,6 +168,7 @@
                 <span class="task-time">{{ task.created_at || '-' }}</span>
                 <div class="task-status">
                   <el-icon v-if="task.task_status === 'success'" class="status-icon success"><CircleCheck /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'partial_success'" class="status-icon partial"><WarningFilled /></el-icon>
                   <el-icon v-else-if="task.task_status === 'failed'" class="status-icon failed"><CircleClose /></el-icon>
                   <el-icon v-else class="status-icon running"><Loading /></el-icon>
                   <span class="status-text">{{ getTaskStatusText(task.task_status || 'running') }}</span>
@@ -315,7 +322,7 @@ defineOptions({
 
 import NodeAPI, { ServiceTable, NodeTable, TaskTable, ServiceForm, NodeForm, ServiceQueryParam } from "@/api/operations/node";
 import { useRouter } from "vue-router";
-import { QuestionFilled, CircleCheck, CircleClose, Loading } from "@element-plus/icons-vue";
+import { QuestionFilled, CircleCheck, CircleClose, Loading, WarningFilled, ArrowDown, ArrowUp } from "@element-plus/icons-vue";
 import DictAPI from "@/api/system/dict";
 import { onBeforeUnmount } from "vue";
 
@@ -591,17 +598,7 @@ async function updateSelectionState() {
   
   selectIds.value = selection.map((item: any) => item.id);
   
-  // 检查ID冲突
-  const idCounts = new Map<number, number>();
-  selection.forEach((item: any) => {
-    idCounts.set(item.id, (idCounts.get(item.id) || 0) + 1);
-  });
-  const duplicateIds = Array.from(idCounts.entries()).filter(([_, count]) => count > 1);
-  if (duplicateIds.length > 0) {
-    console.warn('⚠️ 警告：检测到ID冲突！', duplicateIds.map(([id, count]) => `ID ${id} 出现了 ${count} 次`));
-    console.warn('⚠️ 这会导致父子节点联动异常！请确保父节点和子节点的ID不重复。');
-  }
-  
+  // 提取节点ID（前端已通过 getRowKey 处理ID冲突问题）
   const nodeIdSet = new Set<number>();
   selection.forEach((item: any) => {
     if (item?.nodes && Array.isArray(item.nodes)) {
@@ -638,44 +635,7 @@ async function loadingData() {
       return service;
     });
     
-    // 检查ID冲突
-    console.log('[数据加载] 检查ID冲突...');
-    const allIds = new Set<number>();
-    const duplicates: any[] = [];
-    processedData.forEach((service: any) => {
-      if (allIds.has(service.id)) {
-        duplicates.push({ type: '父节点', name: service.name, id: service.id });
-      }
-      allIds.add(service.id);
-      
-      if (service.nodes) {
-        service.nodes.forEach((node: any) => {
-          if (allIds.has(node.id)) {
-            duplicates.push({ 
-              type: '子节点', 
-              name: node.ip, 
-              id: node.id,
-              parent: service.name 
-            });
-          }
-          allIds.add(node.id);
-        });
-      }
-    });
-    
-    if (duplicates.length > 0) {
-      console.warn('⚠️ 数据警告：检测到ID冲突！');
-      console.warn('冲突的数据:', duplicates);
-      console.warn('建议：数据库中父节点（服务模块）和子节点（IP节点）应使用不同的ID序列');
-      console.info('ℹ️ 前端已通过 rowKey (service_X/node_X) 机制兼容处理，功能可正常使用');
-      ElMessage.warning({
-        message: '数据警告：检测到ID冲突，建议修复后端数据（前端已兼容处理）',
-        duration: 5000
-      });
-    } else {
-      console.log('[数据加载] ✓ 未检测到ID冲突');
-    }
-    
+    console.log('[数据加载] 数据加载成功，共 %d 个服务模块', processedData.length);
     pageTableData.value = processedData;
     // 同时加载服务选项
     await loadServiceOptions();
@@ -1055,6 +1015,7 @@ function getTaskStatusText(status: string) {
   const statusMap: Record<string, string> = {
     running: '执行中',
     success: '完成',
+    partial_success: '部分成功',
     failed: '失败',
   };
   return statusMap[status] || status;
@@ -1062,6 +1023,7 @@ function getTaskStatusText(status: string) {
 
 function progressStatus(status?: string) {
   if (status === 'success') return 'success';
+  if (status === 'partial_success') return 'warning';
   if (status === 'failed') return 'exception';
   return undefined;
 }
@@ -1070,6 +1032,24 @@ function handleOpenTaskDetailFromList(taskId?: number) {
   if (!taskId) return;
   router.push({
     path: `/operations/task/detail/${taskId}`,
+  });
+}
+
+// 全部展开
+function handleExpandAll() {
+  pageTableData.value.forEach((row: any) => {
+    if (row.nodes && row.nodes.length > 0) {
+      dataTableRef.value?.toggleRowExpansion(row, true);
+    }
+  });
+}
+
+// 全部折叠
+function handleCollapseAll() {
+  pageTableData.value.forEach((row: any) => {
+    if (row.nodes && row.nodes.length > 0) {
+      dataTableRef.value?.toggleRowExpansion(row, false);
+    }
   });
 }
 
@@ -1158,6 +1138,10 @@ onBeforeUnmount(() => {
   
   &.success {
     color: #67c23a;
+  }
+  
+  &.partial {
+    color: #e6a23c;
   }
   
   &.failed {

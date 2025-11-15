@@ -180,6 +180,8 @@ function statusLabel(status?: string) {
       return "执行中";
     case "success":
       return "成功";
+    case "partial_success":
+      return "部分成功";
     case "failed":
       return "失败";
     default:
@@ -193,6 +195,8 @@ function statusTag(status?: string) {
       return "warning";
     case "success":
       return "success";
+    case "partial_success":
+      return "warning";
     case "failed":
       return "danger";
     default:
@@ -202,6 +206,7 @@ function statusTag(status?: string) {
 
 function progressStatus(status?: string) {
   if (status === "success") return "success";
+  if (status === "partial_success") return "warning";
   if (status === "failed") return "exception";
   return undefined;
 }
@@ -304,7 +309,7 @@ function handleSSEEvent(event: MessageEvent, defaultType: LogEntry["type"] = "lo
       if (payload.taskStatus) {
         taskDetail.value.task_status = payload.taskStatus;
         // 如果任务已结束，关闭SSE连接并停止定时刷新
-        if (["success", "failed"].includes(payload.taskStatus)) {
+        if (["success", "partial_success", "failed"].includes(payload.taskStatus)) {
           stopLogStream();
           stopTaskDetailRefresh();
           streamStatusLabel.value = "任务已结束";
@@ -394,7 +399,7 @@ function startLogStream() {
   }
   
   // 检查任务状态，如果已结束则不启动SSE连接
-  if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+  if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
     isTaskFinished.value = true;
     streamStatusLabel.value = "任务已结束";
     if (logLines.value.length === 0 || logLines.value.every(entry => entry.type === "system")) {
@@ -426,7 +431,7 @@ function startLogStream() {
     streamStatusLabel.value = "已连接";
     
     // 连接建立后再次检查任务状态
-    if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+    if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
       console.log("[SSE] 连接建立后发现任务已结束，关闭连接");
       isTaskFinished.value = true;
       stopLogStream();
@@ -519,7 +524,7 @@ function startLogStream() {
       return;
     }
     
-    if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+    if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
       isTaskFinished.value = true;
       stopLogStream();
       streamStatusLabel.value = "任务已结束";
@@ -528,7 +533,7 @@ function startLogStream() {
     
     if (source.readyState === EventSource.CLOSED) {
       console.log("[SSE] 连接已关闭");
-      if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+      if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
         isTaskFinished.value = true;
         streamStatusLabel.value = "任务已结束";
         stopLogStream();
@@ -571,7 +576,7 @@ async function fetchTaskDetail() {
     
     const currentStatus = taskDetail.value?.task_status;
     const isRunning = currentStatus === "running";
-    const isFinished = currentStatus && ["success", "failed"].includes(currentStatus);
+    const isFinished = currentStatus && ["success", "partial_success", "failed"].includes(currentStatus);
     
     if (isFinished) {
       isTaskFinished.value = true;
@@ -655,7 +660,7 @@ async function loadCompleteLogs() {
 // ==================== 用户操作 ====================
 
 function restartStream() {
-  if (taskDetail.value?.task_status && ["success", "failed"].includes(taskDetail.value.task_status)) {
+  if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
     ElMessage.warning("任务已结束，无法重连");
     return;
   }
