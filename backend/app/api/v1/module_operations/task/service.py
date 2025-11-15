@@ -187,32 +187,62 @@ class TaskService:
                     logger.warning(f"删除任务日志失败 {path}: {exc}")
 
     @classmethod
-    async def execute_task_service(cls, auth: AuthSchema, node_ids: List[int], task_type: str) -> Dict:
+    async def execute_task_service(cls, auth: AuthSchema, operator_metas: List[Any], task_type: str) -> Dict:
         """
         执行任务 - 统一的任务执行入口
         
         参数:
         - auth: 认证信息
-        - node_ids: 节点ID列表
+        - operator_metas: 操作元数据列表 [{"service_id": 1, "node_ids": [1, 2]}, ...]
         - task_type: 任务类型 (deploy 或 restart)
         
         返回:
         - Dict: 包含任务信息的字典
         """
-        if not node_ids:
+        if not operator_metas:
             task_name = "部署" if task_type == "deploy" else "重启"
             raise CustomException(msg=f"请选择需要{task_name}的节点")
         
         if task_type not in ("deploy", "restart"):
             raise CustomException(msg="任务类型只能是 deploy 或 restart")
 
-        # 获取所有节点信息
+        # 根据 operator_metas 获取节点信息并验证
         nodes = []
-        for node_id in node_ids:
-            node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
-            if not node:
-                raise CustomException(msg=f"节点ID {node_id} 不存在")
-            nodes.append(node)
+        validated_metas = []  # 验证后的元数据（包含节点对象）
+        
+        for meta in operator_metas:
+            service_id = meta.service_id
+            node_ids = meta.node_ids
+            
+            service_nodes = []  # 该服务下的节点列表
+            
+            for node_id in node_ids:
+                # 查询节点
+                node = await ServerCRUD(auth).get_by_id_crud(id=node_id, preload=["service", "services"])
+                if not node:
+                    logger.warning(f"节点ID {node_id} 不存在，跳过")
+                    continue
+                
+                # 验证节点是否属于该服务（检查多对多关系）
+                service_ids_for_node = [s.id for s in (node.services or [])]
+                if service_id not in service_ids_for_node:
+                    # 如果不在多对多关系中，检查是否是主服务
+                    if node.service_id != service_id:
+                        logger.warning(f"节点 {node_id} 不属于服务 {service_id}，跳过")
+                        continue
+                
+                nodes.append(node)
+                service_nodes.append(node)
+            
+            if service_nodes:
+                validated_metas.append({
+                    "service_id": service_id,
+                    "nodes": service_nodes,
+                })
+
+        if not nodes:
+            task_name = "部署" if task_type == "deploy" else "重启"
+            raise CustomException(msg=f"没有找到有效的节点进行{task_name}")
 
         # 创建单个批次任务（包含所有节点）
         task_record = await cls._create_task(auth=auth, nodes=nodes, task_type=task_type)
@@ -220,7 +250,7 @@ class TaskService:
         task = task_record["task"]
         log_path = Path(task_record["log_path"])
 
-        # 使用 TaskExecutor 执行批次任务
+        # 使用 TaskExecutor 执行批次任务，传递 operator_metas
         asyncio.create_task(
             TaskExecutor.execute_batch_task(
                 base_auth=auth,
@@ -228,14 +258,17 @@ class TaskService:
                 log_path=log_path,
                 nodes=nodes,
                 task_type=task_type,
+                operator_metas=validated_metas,  # 传递验证后的 operator_metas
             )
         )
 
         task_name = "部署" if task_type == "deploy" else "重启"
+        
         return {
             "message": f"{task_name}任务已启动",
             "task_id": task.id,
             "node_count": len(nodes),
+            "service_count": len(validated_metas),
             "task_type": task_type,
         }
 

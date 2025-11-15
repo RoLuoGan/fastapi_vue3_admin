@@ -148,6 +148,7 @@ class TaskExecutor:
         log_path: Path,
         nodes: List[Any],
         task_type: str,
+        operator_metas: Optional[List[dict]] = None,
     ) -> None:
         """
         执行批次任务（多个节点）
@@ -158,6 +159,7 @@ class TaskExecutor:
             log_path: 日志文件路径
             nodes: 节点列表
             task_type: 任务类型 (deploy/restart)
+            operator_metas: 操作元数据（可选），格式: [{"service_id": 1, "nodes": [node_obj, ...]}, ...]
         """
         # 获取任务步骤
         if task_type == "deploy":
@@ -189,13 +191,42 @@ class TaskExecutor:
             new_task_crud = TaskCRUD(new_auth)
             
             try:
-                await cls.write_log(log_path, f"开始执行批次{'部署' if task_type == 'deploy' else '重启'}任务")
+                await cls.write_log(log_path, f"批次任务创建成功，共 {total_nodes} 个节点")
+                
+                # 如果提供了 operator_metas，按服务分组显示
+                if operator_metas:
+                    for idx, meta in enumerate(operator_metas, 1):
+                        service_id = meta.get("service_id")
+                        service_nodes = meta.get("nodes", [])
+                        # 获取服务名称（从第一个节点获取）
+                        service_name = None
+                        if service_nodes:
+                            first_node = service_nodes[0]
+                            if hasattr(first_node, 'services'):
+                                for svc in (first_node.services or []):
+                                    if svc.id == service_id:
+                                        service_name = svc.name
+                                        break
+                            if not service_name and hasattr(first_node, 'service'):
+                                if first_node.service and first_node.service.id == service_id:
+                                    service_name = first_node.service.name
+                        
+                        service_display = f"{service_name}(ID:{service_id})" if service_name else f"服务ID:{service_id}"
+                        await cls.write_log(log_path, f"{idx}. {service_display} - {len(service_nodes)} 个节点")
+                        for node in service_nodes:
+                            await cls.write_log(log_path, f"   - {node.ip}:{node.port or 22}")
+                else:
+                    # 如果没有 operator_metas，直接列出所有节点
+                    for idx, node in enumerate(nodes, 1):
+                        await cls.write_log(log_path, f"{idx}. {node.ip}:{node.port or 22}")
+                
+                await cls.write_log(log_path, f"\n开始执行批次{'部署' if task_type == 'deploy' else '重启'}任务")
                 await cls.write_log(log_path, f"共 {total_nodes} 个节点需要处理")
                 await cls.write_log(log_path, "="*60)
                 
                 # 逐个处理节点
                 for idx, node in enumerate(nodes, 1):
-                    await cls.write_log(log_path, f"\n[节点 {idx}/{total_nodes}] {node.ip}:{node.port or 22}")
+                    await cls.write_log(log_path, f"\n{node.ip}:{node.port or 22}")
                     await cls.write_log(log_path, "-"*60)
                     
                     node_success = True
@@ -210,24 +241,24 @@ class TaskExecutor:
                         )
                         await new_db.commit()
                         
-                        await cls.write_log(log_path, f"  [{step_idx}/{len(steps)}] {step}...")
+                        await cls.write_log(log_path, f"[{step_idx}/{len(steps)}] {step}...")
                         await asyncio.sleep(random.uniform(0.3, 0.8))
                         
                         # 模拟随机失败
                         if random.random() < failure_rate:
                             node_success = False
                             error_msg = f"执行 {step} 失败"
-                            await cls.write_log(log_path, f"  [ERROR] {error_msg}")
+                            await cls.write_log(log_path, f"[ERROR] {error_msg}")
                             failed_count += 1
                             break
                         
-                        await cls.write_log(log_path, f"  [✓] {step} 完成")
+                        await cls.write_log(log_path, f"[✓] {step} 完成")
                     
                     if node_success:
                         success_count += 1
-                        await cls.write_log(log_path, f"  [SUCCESS] 节点 {node.ip} 处理成功")
+                        await cls.write_log(log_path, f"[SUCCESS] 节点 {node.ip} 处理成功")
                     else:
-                        await cls.write_log(log_path, f"  [FAILED] 节点 {node.ip} 处理失败")
+                        await cls.write_log(log_path, f"[FAILED] 节点 {node.ip} 处理失败")
                 
                 # 任务完成，更新最终状态
                 await cls.write_log(log_path, "="*60)

@@ -130,26 +130,28 @@ const NodeAPI = {
     });
   },
 
-  // 统一的任务执行接口
-  executeTask(nodeIds: number[], taskType: 'deploy' | 'restart') {
+  // 统一的任务执行接口（新格式：支持多模块多节点）
+  executeTask(data: ExecuteTaskRequest) {
+    console.log('[NodeAPI.executeTask] 接收到的数据:', data);
+    console.log('[NodeAPI.executeTask] 数据类型:', typeof data);
+    console.log('[NodeAPI.executeTask] 数据JSON:', JSON.stringify(data, null, 2));
     return request<ApiResponse>({
       url: `${API_PATH}/execute`,
       method: "post",
-      data: { 
-        node_ids: nodeIds,
-        task_type: taskType
-      },
+      data: data,
     });
   },
 
   // 部署（使用统一接口）
-  deploy(nodeIds: number[]) {
-    return this.executeTask(nodeIds, 'deploy');
+  deploy(data: ExecuteTaskRequest) {
+    console.log('[NodeAPI.deploy] 接收到的数据:', data);
+    return this.executeTask(data);
   },
 
   // 重启（使用统一接口）
-  restart(nodeIds: number[]) {
-    return this.executeTask(nodeIds, 'restart');
+  restart(data: ExecuteTaskRequest) {
+    console.log('[NodeAPI.restart] 接收到的数据:', data);
+    return this.executeTask(data);
   },
 };
 
@@ -282,5 +284,16 @@ export interface TaskDetail extends TaskTable {
 
 export interface TaskLog {
   content: string;
+}
+
+export interface OperatorMeta {
+  service_id: number;
+  node_ids: number[];
+}
+
+export interface ExecuteTaskRequest {
+  task_type: 'node_operator';
+  operator_type: 'deploy' | 'restart';
+  operator_metas: OperatorMeta[];
 }
 

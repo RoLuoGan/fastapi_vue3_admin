@@ -22,18 +22,22 @@ from .service import TaskService
 router = APIRouter(route_class=OperationLogRoute, prefix="/node", tags=["任务管理"])
 
 
-@router.post("/execute", summary="执行任务", description="统一的任务执行接口（部署/重启）")
+@router.post("/execute", summary="执行任务", description="统一的任务执行接口（部署/重启）- 支持多模块多节点")
 async def execute_task_controller(
     data: ExecuteTaskSchema,
     auth: AuthSchema = Depends(AuthPermission(["operations:node:deploy", "operations:node:restart"])),
 ) -> JSONResponse:
+    logger.info(f"收到任务请求 - 操作类型: {data.operator_type}, 模块数: {len(data.operator_metas)}")
+    
+    # 直接传递完整的 operator_metas 到 Service 层
     result = await TaskService.execute_task_service(
-        node_ids=data.node_ids,
-        task_type=data.task_type,
+        operator_metas=data.operator_metas,
+        task_type=data.operator_type,
         auth=auth
     )
-    task_name = "部署" if data.task_type == "deploy" else "重启"
-    logger.info(f"{task_name}服务成功: {result}")
+    
+    task_name = "部署" if data.operator_type == "deploy" else "重启"
+    logger.info(f"{task_name}任务已启动: task_id={result.get('task_id')}, 节点数={result.get('node_count')}")
     return SuccessResponse(data=result, msg=f"{task_name}任务已启动")
 
 

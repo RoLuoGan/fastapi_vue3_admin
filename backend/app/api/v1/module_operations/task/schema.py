@@ -97,10 +97,24 @@ class TaskLogSchema(BaseModel):
     content: str = Field(default="", description="日志内容")
 
 
-class ExecuteTaskSchema(BaseModel):
-    """执行任务模型"""
+class OperatorMetaSchema(BaseModel):
+    """操作元数据"""
+    service_id: int = Field(..., description="服务模块ID")
     node_ids: List[int] = Field(..., description="节点ID列表", min_length=1)
-    task_type: str = Field(..., description="任务类型: deploy(部署) 或 restart(重启)", pattern="^(deploy|restart)$")
+
+
+class ExecuteTaskSchema(BaseModel):
+    """执行任务模型（通用格式，支持多模块多节点）"""
+    task_type: str = Field("node_operator", description="任务类型（固定为node_operator）")
+    operator_type: str = Field(..., description="操作类型: deploy(部署) 或 restart(重启)")
+    operator_metas: List[OperatorMetaSchema] = Field(..., description="操作元数据列表", min_length=1)
+    
+    @model_validator(mode="after")
+    def validate_operator_type(self):
+        """验证操作类型"""
+        if self.operator_type not in ["deploy", "restart"]:
+            raise ValueError("operator_type 必须是 deploy 或 restart")
+        return self
 
 
 from ..server.schema import ServerOutSchema  # noqa: E402  # 解决前向引用
