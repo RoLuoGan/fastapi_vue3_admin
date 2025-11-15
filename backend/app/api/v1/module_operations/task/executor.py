@@ -53,93 +53,6 @@ class TaskExecutor:
             await log_file.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
 
     @classmethod
-    async def execute_task(
-        cls,
-        *,
-        base_auth: AuthSchema,
-        task_id: int,
-        log_path: Path,
-        task_type: str,
-    ) -> None:
-        """
-        执行任务
-        
-        Args:
-            base_auth: 基础认证信息
-            task_id: 任务ID
-            log_path: 日志文件路径
-            task_type: 任务类型 (deploy/restart)
-        """
-        # 模拟任务执行步骤
-        if task_type == "deploy":
-            steps = [
-                "检查节点状态",
-                "备份当前版本",
-                "下载新版本文件",
-                "停止旧服务",
-                "部署新版本",
-                "启动新服务",
-                "验证服务状态",
-            ]
-        else:  # restart
-            steps = [
-                "检查节点状态",
-                "停止服务",
-                "清理临时文件",
-                "启动服务",
-                "验证服务状态",
-            ]
-
-        failure_rate = 0.2 if task_type == "deploy" else 0.15
-
-        async with AsyncSessionLocal() as new_db:
-            new_auth = AuthSchema(db=new_db, user=base_auth.user, check_data_scope=False)
-            new_task_crud = TaskCRUD(new_auth)
-
-            try:
-                await cls.write_log(log_path, f"开始执行{'部署' if task_type == 'deploy' else '重启'}任务")
-                total_steps = len(steps)
-                for index, step in enumerate(steps, start=1):
-                    await asyncio.sleep(random.uniform(0.6, 1.2))
-                    await cls.write_log(log_path, step)
-                    progress = min(int(index / (total_steps + 1) * 100), 95)
-                    await new_task_crud.update(id=task_id, data={"progress": progress})
-                    await new_db.commit()
-
-                await asyncio.sleep(random.uniform(0.8, 1.5))
-                success = random.random() > failure_rate
-                if success:
-                    await cls.write_log(log_path, "任务执行成功")
-                    update_data = {"task_status": "success", "progress": 100, "error_message": None}
-                else:
-                    await cls.write_log(log_path, "任务执行失败")
-                    update_data = {
-                        "task_status": "failed",
-                        "progress": 100,
-                        "error_message": "模拟执行失败，请检查日志",
-                    }
-                await new_task_crud.update(id=task_id, data=update_data)
-                await new_db.commit()
-            except asyncio.CancelledError:
-                await new_db.rollback()
-                await cls.write_log(log_path, "任务被取消")
-                await new_task_crud.update(
-                    id=task_id,
-                    data={"task_status": "failed", "error_message": "任务被取消", "progress": 100},
-                )
-                await new_db.commit()
-                raise
-            except Exception as exc:
-                await new_db.rollback()
-                await cls.write_log(log_path, f"任务执行异常: {exc}")
-                await new_task_crud.update(
-                    id=task_id,
-                    data={"task_status": "failed", "error_message": str(exc), "progress": 100},
-                )
-                await new_db.commit()
-                logger.error(f"任务执行失败: {exc}")
-
-    @classmethod
     async def execute_batch_task(
         cls,
         *,
@@ -283,8 +196,6 @@ class TaskExecutor:
                     data={
                         "task_status": final_status,
                         "progress": 100,
-                        "success_nodes": success_count,
-                        "failed_nodes": failed_count,
                         "error_message": f"成功{success_count}个，失败{failed_count}个" if failed_count > 0 else None,
                     }
                 )
@@ -299,8 +210,6 @@ class TaskExecutor:
                         "task_status": "failed",
                         "error_message": "任务被取消",
                         "progress": 100,
-                        "success_nodes": success_count,
-                        "failed_nodes": failed_count,
                     },
                 )
                 await new_db.commit()
@@ -314,8 +223,6 @@ class TaskExecutor:
                         "task_status": "failed",
                         "error_message": str(exc),
                         "progress": 100,
-                        "success_nodes": success_count,
-                        "failed_nodes": failed_count,
                     },
                 )
                 await new_db.commit()

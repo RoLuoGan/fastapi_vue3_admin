@@ -3,29 +3,20 @@
 任务领域 Schema 定义
 """
 
-from typing import Optional, Dict, Any, TYPE_CHECKING, List
+from typing import Optional, Dict, Any, List
 import json
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.base_schema import BaseSchema
 
-if TYPE_CHECKING:
-    from ..server.schema import ServerOutSchema
-    from ..service_module.schema import ServiceOutSchema
-
 
 class TaskOutSchema(BaseSchema):
     """任务响应模型"""
     model_config = {"from_attributes": True}
 
-    service_id: Optional[int] = Field(default=None, description="服务模块ID")
-    service_name: Optional[str] = Field(default=None, description="服务模块名称")
-    node_id: Optional[int] = Field(default=None, description="节点ID")
-    node_name: Optional[str] = Field(default=None, description="节点名称")
-    ip: str = Field(..., description="任务IP地址")
     task_type: str = Field(..., description="任务类型(deploy:部署, restart:重启)")
-    task_status: str = Field(..., description="任务状态(running:执行中, success:完成, failed:失败)")
+    task_status: str = Field(..., description="任务状态(running:执行中, success:完成, failed:失败, partial_success:部分成功)")
     progress: int = Field(default=0, ge=0, le=100, description="任务进度百分比")
     log_path: Optional[str] = Field(default=None, description="任务日志路径")
     params: Optional[Dict[str, Any]] = Field(default=None, description="任务参数")
@@ -40,12 +31,10 @@ class TaskOutSchema(BaseSchema):
         if values is None:
             return values
 
+        # 如果是ORM对象，转换为字典
         if not isinstance(values, dict):
             attr_names = [
                 "id",
-                "service_id",
-                "node_id",
-                "ip",
                 "task_type",
                 "task_status",
                 "progress",
@@ -57,38 +46,22 @@ class TaskOutSchema(BaseSchema):
                 "module_group",
                 "created_at",
                 "updated_at",
-                "service",
-                "node",
             ]
             values = {name: getattr(values, name, None) for name in attr_names}
 
+        # 解析 JSON 格式的 params 字段
         params = values.get("params")
         if isinstance(params, str) and params:
             try:
                 values["params"] = json.loads(params)
             except json.JSONDecodeError:
                 values["params"] = {"raw": params}
-        if not values.get("service_name"):
-            service = values.get("service")
-            if service:
-                if isinstance(service, dict):
-                    values["service_name"] = service.get("name")
-                else:
-                    values["service_name"] = getattr(service, "name", None)
-        if not values.get("node_name"):
-            node = values.get("node")
-            if node:
-                if isinstance(node, dict):
-                    values["node_name"] = node.get("ip") or node.get("description")
-                else:
-                    values["node_name"] = getattr(node, "ip", None)
+        
         return values
 
 
 class TaskDetailSchema(TaskOutSchema):
     """任务详情响应模型"""
-    node: Optional["ServerOutSchema"] = Field(default=None, description="节点信息")
-    service: Optional["ServiceOutSchema"] = Field(default=None, description="服务模块信息")
     log_size: Optional[int] = Field(default=None, description="日志文件大小（字节）")
 
 
@@ -115,10 +88,3 @@ class ExecuteTaskSchema(BaseModel):
         if self.operator_type not in ["deploy", "restart"]:
             raise ValueError("operator_type 必须是 deploy 或 restart")
         return self
-
-
-from ..server.schema import ServerOutSchema  # noqa: E402  # 解决前向引用
-from ..service_module.schema import ServiceOutSchema  # noqa: E402
-
-TaskDetailSchema.model_rebuild()
-

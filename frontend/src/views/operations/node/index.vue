@@ -401,6 +401,9 @@ const serviceOptions = ref<ServiceTable[]>([]);
 const taskList = ref<TaskTable[]>([]);
 const router = useRouter();
 
+// 子节点联动标志（防止父节点取消子节点时的连锁反应）
+const isChildLinkage = ref(false);
+
 // 字典选项
 const projectOptions = ref<any[]>([]);
 const moduleGroupOptions = ref<any[]>([]);
@@ -423,14 +426,18 @@ const nodeRules = reactive({
 /**
  * 生成行的唯一Key（解决父子节点ID冲突问题）
  * 父节点：service_${id}
- * 子节点：node_${id}
+ * 子节点：node_${composite_id} (composite_id格式：模块ID_节点ID)
  */
 function getRowKey(row: any): string {
   if (row.nodes && Array.isArray(row.nodes)) {
     // 父节点（服务模块）
     return `service_${row.id}`;
   } else {
-    // 子节点（IP节点）
+    // 子节点（IP节点）- 使用复合ID（模块ID_节点ID）防止不同模块下相同节点ID冲突
+    if (row.composite_id) {
+      return `node_${row.composite_id}`;
+    }
+    // 兼容处理：如果没有composite_id，使用原始ID（不应该出现这种情况）
     return `node_${row.id}`;
   }
 }
@@ -487,15 +494,39 @@ async function handleSelect(selection: any[], row: any) {
           dataTableRef.value?.toggleRowSelection(node, true);
         });
       } else {
-        console.log('✗ 取消父节点，将取消所有子节点:', row.nodes.map((n: any) => n.ip));
-        // 取消选择时，取消该模块下所有节点的选择
-        row.nodes?.forEach((node: any) => {
-          console.log('  - 取消子节点:', node.ip, '(Key:', getRowKey(node), 'ID:', node.id, ')');
-          dataTableRef.value?.toggleRowSelection(node, false);
-        });
+        console.log('✗ 取消父节点');
+        // 如果是子节点联动导致的取消，不要取消子节点（避免连锁反应）
+        if (isChildLinkage.value) {
+          console.log('  检测到子节点联动标志，跳过取消子节点操作，避免连锁反应');
+        } else {
+          console.log('  将取消所有子节点:', row.nodes.map((n: any) => n.ip));
+          // 取消选择时，取消该模块下所有节点的选择
+          // 但需要检查每个子节点是否真的需要取消（避免取消用户单独选中的子节点）
+          const currentSelection = dataTableRef.value?.getSelectionRows() || [];
+          row.nodes?.forEach((node: any) => {
+            const nodeKey = getRowKey(node);
+            const isNodeSelected = currentSelection.some((item: any) => getRowKey(item) === nodeKey);
+            if (isNodeSelected) {
+              console.log('  - 取消子节点:', node.ip, '(Key:', nodeKey, 'ID:', node.id, ')');
+              dataTableRef.value?.toggleRowSelection(node, false);
+            } else {
+              console.log('  - 子节点已处于未选中状态，跳过:', node.ip);
+            }
+          });
+        }
       }
     } else {
       console.log('检测到子节点（IP节点）:', row.ip);
+      
+      // 使用 selection 参数判断子节点是否被选中（这是 Element Plus 传递的最新状态）
+      const isChildSelected = selection.some((item: any) => getRowKey(item) === rowKey);
+      
+      console.log('子节点选中状态（从selection参数）:', isChildSelected);
+      console.log('当前所有选中项（从selection参数）:', selection.map((s: any) => ({ 
+        rowKey: getRowKey(s),
+        id: s.id, 
+        name: s.name || s.ip 
+      })));
       
       // 检查该子节点的父节点（需要比较完整的节点对象，因为ID可能重复）
       const parent = pageTableData.value.find((service: any) =>
@@ -507,23 +538,77 @@ async function handleSelect(selection: any[], row: any) {
       if (parent && parent.nodes) {
         console.log('子节点所属父节点:', parent.name);
         
-        // 等待子节点选中状态更新后，检查父节点状态
+        // 等待 DOM 更新，确保选中状态已同步
         await nextTick();
+        
+        // 重新获取最新的选中状态（用于检查所有子节点）
         const currentSelection = dataTableRef.value?.getSelectionRows() || [];
         
-        // 检查该父节点下的所有子节点是否都被选中（使用rowKey比较）
-        const allChildrenSelected = parent.nodes.every((child: any) =>
-          currentSelection.some((item: any) => getRowKey(item) === getRowKey(child))
-        );
+        // 再次确认子节点是否在选中列表中（使用rowKey比较）
+        const isChildReallySelected = currentSelection.some((item: any) => getRowKey(item) === rowKey);
         
-        console.log('所有兄弟节点是否都选中:', allChildrenSelected);
+        console.log('子节点实际选中状态（从getSelectionRows）:', isChildReallySelected);
+        console.log('当前所有选中项（从getSelectionRows）:', currentSelection.map((s: any) => ({ 
+          rowKey: getRowKey(s),
+          id: s.id, 
+          name: s.name || s.ip 
+        })));
         
-        if (allChildrenSelected) {
-          console.log('✓ 所有子节点已选中，自动选中父节点:', parent.name);
-          dataTableRef.value?.toggleRowSelection(parent, true);
+        // 检查父节点当前是否被选中
+        const isParentSelected = currentSelection.some((item: any) => getRowKey(item) === getRowKey(parent));
+        
+        // 如果子节点确实被选中，才处理父节点
+        if (isChildReallySelected) {
+          // 检查该父节点下的所有子节点是否都被选中（使用rowKey比较）
+          const allChildrenSelected = parent.nodes.every((child: any) =>
+            currentSelection.some((item: any) => getRowKey(item) === getRowKey(child))
+          );
+          
+          console.log('所有兄弟节点是否都选中:', allChildrenSelected);
+          console.log('父节点当前选中状态:', isParentSelected);
+          console.log('父节点下所有子节点状态:', parent.nodes.map((n: any) => ({
+            ip: n.ip,
+            id: n.id,
+            composite_id: n.composite_id,
+            rowKey: getRowKey(n),
+            isSelected: currentSelection.some((item: any) => getRowKey(item) === getRowKey(n))
+          })));
+          
+          if (allChildrenSelected) {
+            // 所有子节点都选中，选中父节点（如果还没选中）
+            if (!isParentSelected) {
+              console.log('✓ 所有子节点已选中，自动选中父节点:', parent.name);
+              dataTableRef.value?.toggleRowSelection(parent, true);
+            }
+          } else {
+            // 不是所有子节点都选中，取消父节点（如果父节点当前是选中状态）
+            // 设置子节点联动标志，防止父节点取消子节点时的连锁反应
+            if (isParentSelected) {
+              console.log('✗ 存在未选中的子节点，取消父节点:', parent.name);
+              isChildLinkage.value = true;
+              dataTableRef.value?.toggleRowSelection(parent, false);
+              // 延迟重置标志，确保父节点的 handleSelect 能检测到
+              setTimeout(() => {
+                isChildLinkage.value = false;
+              }, 50);
+            } else {
+              console.log('✗ 存在未选中的子节点，父节点已处于未选中状态，无需操作');
+            }
+          }
         } else {
-          console.log('✗ 存在未选中的子节点，取消父节点:', parent.name);
-          dataTableRef.value?.toggleRowSelection(parent, false);
+          // 子节点没有被选中（可能是被取消了），确保父节点也被取消（如果父节点当前是选中状态）
+          // 设置子节点联动标志，防止父节点取消子节点时的连锁反应
+          if (isParentSelected) {
+            console.log('✗ 子节点没有被选中，取消父节点:', parent.name);
+            isChildLinkage.value = true;
+            dataTableRef.value?.toggleRowSelection(parent, false);
+            // 延迟重置标志，确保父节点的 handleSelect 能检测到
+            setTimeout(() => {
+              isChildLinkage.value = false;
+            }, 50);
+          } else {
+            console.log('✗ 子节点没有被选中，父节点已处于未选中状态，无需操作');
+          }
         }
       }
     }
@@ -558,7 +643,8 @@ async function handleSelectAll(selection: any[]) {
         if (service.nodes && service.nodes.length > 0) {
           console.log(`  子节点数量: ${service.nodes.length}`);
           service.nodes.forEach((node: any) => {
-            console.log(`  - 选中子节点: ${node.ip} (ID: ${node.id})`);
+            const compositeId = node.composite_id ? ` (复合ID: ${node.composite_id})` : '';
+            console.log(`  - 选中子节点: ${node.ip} (ID: ${node.id}${compositeId})`);
             dataTableRef.value?.toggleRowSelection(node, true);
           });
         } else {
@@ -604,13 +690,15 @@ async function updateSelectionState() {
     if (item?.nodes && Array.isArray(item.nodes)) {
       console.log(`  [父节点] ${item.name} (ID: ${item.id}) 包含 ${item.nodes.length} 个子节点:`);
       item.nodes.forEach((node: any) => {
-        console.log(`    └─ [子] ${node.ip} (ID: ${node.id})`);
+        const compositeId = node.composite_id ? ` (复合ID: ${node.composite_id})` : '';
+        console.log(`    └─ [子] ${node.ip} (ID: ${node.id}${compositeId})`);
         if (node?.id) {
           nodeIdSet.add(node.id);
         }
       });
     } else if (!item?.nodes && item?.id) {
-      console.log(`  [子节点] ${item.ip} (ID: ${item.id})`);
+      const compositeId = item.composite_id ? ` (复合ID: ${item.composite_id})` : '';
+      console.log(`  [子节点] ${item.ip} (ID: ${item.id}${compositeId})`);
       nodeIdSet.add(item.id);
     }
   });
@@ -626,16 +714,36 @@ async function loadingData() {
   loading.value = true;
   try {
     const response = await NodeAPI.getServiceTree(queryFormData);
-    // 展示所有服务模块，但只显示有service_id的节点（过滤掉没有关联服务模块的节点）
+    // 接口返回的 nodes 已经通过多对多关系关联，直接使用即可
     const processedData = (response.data.data || []).map((service: any) => {
-      // 过滤掉没有service_id的节点（这些节点不应该单独显示）
-      if (service.nodes) {
-        service.nodes = service.nodes.filter((node: any) => node.service_id);
+      // 确保 nodes 数组存在（即使为空也要保留）
+      if (!service.nodes) {
+        service.nodes = [];
       }
+      // 为每个子节点生成复合ID（模块ID_节点ID），防止不同模块下相同节点ID冲突
+      if (service.nodes && Array.isArray(service.nodes)) {
+        service.nodes = service.nodes.map((node: any) => {
+          // 生成复合ID：service_id_node_id
+          node.composite_id = `${service.id}_${node.id}`;
+          return node;
+        });
+      }
+      // 为树形表格添加 hasChildren 属性
+      service.hasChildren = service.nodes && service.nodes.length > 0;
       return service;
     });
     
     console.log('[数据加载] 数据加载成功，共 %d 个服务模块', processedData.length);
+    // 调试：打印每个服务的节点数量
+    processedData.forEach((service: any) => {
+      const nodeCount = service.nodes?.length || 0;
+      console.log(`  - ${service.name} (ID: ${service.id}): ${nodeCount} 个节点`);
+      if (service.nodes && service.nodes.length > 0) {
+        service.nodes.forEach((node: any) => {
+          console.log(`    └─ ${node.ip} (节点ID: ${node.id}, 复合ID: ${node.composite_id})`);
+        });
+      }
+    });
     pageTableData.value = processedData;
     // 同时加载服务选项
     await loadServiceOptions();

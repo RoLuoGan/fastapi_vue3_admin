@@ -16,9 +16,6 @@ class TaskQueryParam:
         self,
         task_type: Optional[str] = Query(None, description="任务类型"),
         task_status: Optional[str] = Query(None, description="任务状态"),
-        service_id: Optional[int] = Query(None, description="服务模块ID"),
-        node_id: Optional[int] = Query(None, description="节点ID"),
-        ip: Optional[str] = Query(None, description="IP地址"),
         project: Optional[str] = Query(None, description="运维管理项目"),
         idc: Optional[str] = Query(None, description="机房"),
         module_group: Optional[str] = Query(None, description="模块分组"),
@@ -28,9 +25,6 @@ class TaskQueryParam:
 
         self.task_type = task_type
         self.task_status = task_status
-        self.service_id = service_id
-        self.node_id = node_id
-        self.ip = ("like", ip)
         self.project = project
         self.idc = idc
         self.module_group = module_group

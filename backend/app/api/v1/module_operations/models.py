@@ -92,20 +92,8 @@ class TaskModel(CreatorMixin):
     params: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="构建参数JSON")
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="错误信息")
     
-    # 统计字段
-    total_nodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="总节点数")
-    success_nodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="成功节点数")
-    failed_nodes: Mapped[int] = mapped_column(Integer, nullable=False, default=0, comment="失败节点数")
-    
-    # 保留字段用于向后兼容和统计
-    service_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("operations_service.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, index=True, comment="主服务模块ID（保留）")
-    node_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("operations_node.id", ondelete="SET NULL", onupdate="CASCADE"), nullable=True, index=True, comment="主节点ID（保留）")
-    ip: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="主IP地址（保留）")
+    # 通用字段（用于筛选）
     project: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="运维管理项目")
     idc: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="机房")
     module_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="模块分组")
-
-    # 关联关系
-    node: Mapped[Optional["NodeModel"]] = relationship(lazy="selectin")
-    service: Mapped[Optional["ServiceModel"]] = relationship(lazy="selectin")
 

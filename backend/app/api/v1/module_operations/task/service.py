@@ -28,26 +28,35 @@ class TaskService:
     """任务管理服务层 - 只负责业务拼装和调度"""
 
     @classmethod
-    def _build_task_params(cls, auth: AuthSchema, nodes: List[Any], task_type: str) -> Dict[str, Any]:
-        """构建任务参数 - 支持多节点（新格式）"""
-        user = auth.user
-        operator_name = None
-        if user:
-            operator_name = getattr(user, "name", None) or getattr(user, "nickname", None) or user.username
+    def _build_task_params(cls, auth: AuthSchema, validated_metas: List[Dict], task_type: str) -> Dict[str, Any]:
+        """
+        构建任务参数 - 新格式
+        
+        参数:
+        - auth: 认证信息
+        - validated_metas: 验证后的操作元数据列表 [{"service_id": 1, "nodes": [node_obj, ...]}, ...]
+        - task_type: 任务类型 (deploy 或 restart)
+        
+        返回:
+        - Dict: 任务参数字典，格式:
+          {
+            "task_type": "node_operator",
+            "operator_type": "deploy",
+            "operator_metas": [
+              {"service_id": 1, "node_ids": [1, 2]},
+              {"service_id": 2, "node_ids": [3, 4]}
+            ]
+          }
+        """
         return {
             "task_type": "node_operator",
             "operator_type": task_type,  # deploy 或 restart
-            "operator_id": user.id if user else None,
-            "operator_name": operator_name,
-            "trigger_time": datetime.utcnow().isoformat(),
             "operator_metas": [
                 {
-                    "id": node.id,
-                    "ip": node.ip,
-                    "port": node.port or 22,
-                    "service_id": node.service_id,
+                    "service_id": meta["service_id"],
+                    "node_ids": [node.id for node in meta["nodes"]],
                 }
-                for node in nodes
+                for meta in validated_metas
             ],
         }
 
@@ -56,11 +65,18 @@ class TaskService:
         cls,
         auth: AuthSchema,
         nodes: List[Any],
+        validated_metas: List[Dict],
         task_type: str,
     ) -> Dict[str, Any]:
         """
         创建单个批次任务记录（包含多个节点）
         委托日志路径构建给 TaskExecutor，委托日志写入给 TaskExecutor
+        
+        参数:
+        - auth: 认证信息
+        - nodes: 所有节点列表
+        - validated_metas: 验证后的操作元数据列表 [{"service_id": 1, "nodes": [node_obj, ...]}, ...]
+        - task_type: 任务类型 (deploy 或 restart)
         """
         task_crud = TaskCRUD(auth)
         
@@ -69,7 +85,7 @@ class TaskService:
         log_path = TaskExecutor.build_log_path(task_type=task_type, node_ip=f"batch_{timestamp}")
         
         # 构建新格式的任务参数
-        params_dict = cls._build_task_params(auth=auth, nodes=nodes, task_type=task_type)
+        params_dict = cls._build_task_params(auth=auth, validated_metas=validated_metas, task_type=task_type)
         
         # 准备任务数据
         task_data = {
@@ -78,20 +94,7 @@ class TaskService:
             "progress": 0,
             "log_path": str(log_path),
             "params": json.dumps(params_dict, ensure_ascii=False),
-            "total_nodes": len(nodes),
-            "success_nodes": 0,
-            "failed_nodes": 0,
         }
-        
-        # 如果所有节点来自同一个服务模块，记录service_id
-        service_ids = set(node.service_id for node in nodes if node.service_id)
-        if len(service_ids) == 1:
-            task_data["service_id"] = list(service_ids)[0]
-        
-        # 记录第一个节点的IP和ID（用于向后兼容）
-        if nodes:
-            task_data["node_id"] = nodes[0].id
-            task_data["ip"] = nodes[0].ip
         
         task = await task_crud.create(data=task_data)
         
@@ -105,7 +108,7 @@ class TaskService:
 
     @classmethod
     async def get_recent_tasks_service(cls, auth: AuthSchema, limit: int = 20) -> List[Dict]:
-        tasks = await TaskCRUD(auth).get_recent_tasks_crud(limit=limit, preload=["node", "service"])
+        tasks = await TaskCRUD(auth).get_recent_tasks_crud(limit=limit)
         return [TaskOutSchema.model_validate(task).model_dump() for task in tasks]
 
     @classmethod
@@ -128,15 +131,11 @@ class TaskService:
             order_by=order,
             search=search_dict,
             out_schema=TaskOutSchema,
-            preload=["service", "node"],
         )
 
     @classmethod
     async def get_task_detail_service(cls, auth: AuthSchema, task_id: int) -> Dict:
-        task = await TaskCRUD(auth).get_by_id_crud(
-            id=task_id,
-            preload=["node", "node.service", "service"],
-        )
+        task = await TaskCRUD(auth).get_by_id_crud(id=task_id)
         if not task:
             raise CustomException(msg="任务不存在")
         data = TaskDetailSchema.model_validate(task).model_dump()
@@ -245,7 +244,12 @@ class TaskService:
             raise CustomException(msg=f"没有找到有效的节点进行{task_name}")
 
         # 创建单个批次任务（包含所有节点）
-        task_record = await cls._create_task(auth=auth, nodes=nodes, task_type=task_type)
+        task_record = await cls._create_task(
+            auth=auth,
+            nodes=nodes,
+            validated_metas=validated_metas,
+            task_type=task_type
+        )
 
         task = task_record["task"]
         log_path = Path(task_record["log_path"])

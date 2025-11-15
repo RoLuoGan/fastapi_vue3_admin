@@ -245,11 +245,6 @@ export interface NodePageQuery extends PageQuery {
 
 export interface TaskTable {
   id?: number;
-  service_id?: number;
-  service_name?: string;
-  node_id?: number;
-  node_name?: string;
-  ip?: string;
   task_type?: string;
   task_status?: string;
   progress?: number;
@@ -266,9 +261,6 @@ export interface TaskTable {
 export interface TaskPageQuery extends PageQuery {
   task_type?: string;
   task_status?: string;
-  service_id?: number;
-  node_id?: number;
-  ip?: string;
   project?: string;
   idc?: string;
   module_group?: string;
@@ -278,8 +270,6 @@ export interface TaskPageQuery extends PageQuery {
 
 export interface TaskDetail extends TaskTable {
   log_size?: number;
-  node?: NodeTable;
-  service?: ServiceTable;
 }
 
 export interface TaskLog {
