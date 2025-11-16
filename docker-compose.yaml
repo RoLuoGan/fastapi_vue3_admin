@@ -64,18 +64,9 @@ services:
       TZ: "Asia/Shanghai"
     ports:
       - "80:80"
-      - "443:443"
     volumes:
       - ./devops/nginx/nginx.conf:/etc/nginx/nginx.conf
-      # - ./frontend/dist:/usr/share/nginx/html/frontend/dist 如果使用服务器构建前端则不要注释这三行
-      # - ./fastapp/dist/build/h5:/usr/share/nginx/html/fastapp/dist/build/h5
-      # - ./fastdocs/dist:/usr/share/nginx/html/fastdocs/dist
-      #  下面三行是本地前端打包好放在服务器的路径，如果使用服务器打包则使用上面方式
-      - /home/fastapiadmin/frontend:/usr/share/nginx/html/frontend
-      - /home/fastapiadmin/fastapp:/usr/share/nginx/html/fastapp
-      - /home/fastapiadmin/fastdocs:/usr/share/nginx/html/fastdocs
-      # ssl 证书
-      - /home/fastapiadmin/ssl:/etc/nginx/ssl:ro
+      - ./frontend/dist:/usr/share/nginx/html/frontend/dist
     depends_on:
       - backend
     networks:

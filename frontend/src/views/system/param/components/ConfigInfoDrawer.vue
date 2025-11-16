@@ -1,5 +1,5 @@
 <template>
-  <el-drawer v-model="drawerVisible" title="配置中心" :size="drawerSize" destroy-on-close @closed="onDrawerClosed">
+  <el-drawer v-model="drawerVisible" title="" :size="drawerSize" destroy-on-close @closed="onDrawerClosed">
     <el-tabs v-model="activeTabRef" type="border-card" >
       <!-- 网站配置 -->
       <el-tab-pane label="网站配置" name="website">

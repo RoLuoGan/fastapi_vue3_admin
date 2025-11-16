@@ -7,7 +7,7 @@ PROJECT_PATH="${WORK_DIR}/${PROJECT_NAME}"
 GIT_REPO="https://gitee.com/tao__tao/${PROJECT_NAME}.git"
 
 # 是否有更新前端
-UPDATE_FRONTEND=false
+UPDATE_FRONTEND=true
 # 是否有更新移动端
 UPDATE_FASTAPP=false
 # 是否有更新官网

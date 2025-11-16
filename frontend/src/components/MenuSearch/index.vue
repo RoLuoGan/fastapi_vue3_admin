@@ -302,7 +302,7 @@ function loadRoutes(routes: RouteRecordRaw[], parentPath = "") {
     if (route.children) {
       // 如果父路由本身有title，也添加到menuItems中
       if (route.meta?.title) {
-        const title = route.meta.title === "dashboard" ? "首页" : route.meta.title;
+        const title = route.meta.title === "dashboard" ? "" : route.meta.title;
         menuItems.value.push({
           title,
           path,

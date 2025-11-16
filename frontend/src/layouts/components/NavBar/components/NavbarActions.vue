@@ -51,22 +51,6 @@
               <el-icon><Setting /></el-icon>
               {{ t("navbar.config") }}
             </el-dropdown-item>
-            <el-dropdown-item @click="handleDocumentClick">
-              <el-icon><Document /></el-icon>
-              {{ t("navbar.document") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click="handleGiteeClick">
-              <el-icon><Reading /></el-icon>
-              {{ t("navbar.gitee") }}
-            </el-dropdown-item>
-            <el-dropdown-item @click="handleTourClick">
-              <el-icon><Position /></el-icon>
-              {{ t("navbar.tour") }}
-            </el-dropdown-item>
-            <el-dropdown-item divided @click="handlelockScreen">
-              <el-icon><Lock /></el-icon>
-              {{ t("navbar.lock") }}
-            </el-dropdown-item>
             <el-dropdown-item  @click="logout">
               <el-icon><SwitchButton /></el-icon>
               {{ t("navbar.logout") }}
