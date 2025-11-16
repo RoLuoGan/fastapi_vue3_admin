@@ -132,8 +132,8 @@ class TaskExecutor:
             new_task_crud = TaskCRUD(new_auth)
             
             try:
-                # 构建脚本参数
-                script_path = settings.BASE_DIR.joinpath("app", "scripts", "execute_batch_task.py")
+                # 构建脚本参数（脚本位于 env 同级的 scripts 目录）
+                script_path = settings.BASE_DIR.joinpath("scripts", "execute_batch_task.py")
                 if not script_path.exists():
                     raise FileNotFoundError(f"脚本文件不存在: {script_path}")
                 
