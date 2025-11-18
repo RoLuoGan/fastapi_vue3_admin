@@ -17,41 +17,24 @@ import json
 import io
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
+import subprocess
+import threading
 
-# Windows 编码兼容处理
-if sys.platform == 'win32':
-    try:
-        if hasattr(sys.stdout, 'reconfigure'):
-            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-        elif hasattr(sys.stdout, 'buffer'):
-            sys.stdout = io.TextIOWrapper(
-                sys.stdout.buffer, 
-                encoding='utf-8', 
-                errors='replace', 
-                line_buffering=True
-            )
-    except (AttributeError, OSError):
-        pass
-    
-    try:
-        if hasattr(sys.stderr, 'reconfigure'):
-            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
-        elif hasattr(sys.stderr, 'buffer'):
-            sys.stderr = io.TextIOWrapper(
-                sys.stderr.buffer, 
-                encoding='utf-8', 
-                errors='replace', 
-                line_buffering=True
-            )
-    except (AttributeError, OSError):
-        pass
-
+EXTENSION_NAME = "demo_task_script.py"
 
 class BatchTaskExecutor:
     """批次任务执行器基类"""
     
-    def __init__(self, log_path: Path, task_id: int, task_type: str, operator_metas: List[Dict]):
+    def __init__(
+        self,
+        log_path: Path,
+        task_id: int,
+        task_type: str,
+        operator_metas: List[Dict],
+        log_handler: Optional[Callable[[str], None]] = None,
+        progress_handler: Optional[Callable[[int, str], None]] = None,
+    ):
         """
         初始化执行器
         
@@ -66,6 +49,8 @@ class BatchTaskExecutor:
         self.task_type = task_type
         self.operator_metas = operator_metas
         self.start_time = datetime.now()
+        self.log_handler = log_handler
+        self.progress_handler = progress_handler
         
     def write_log(self, message: str):
         """
@@ -77,11 +62,13 @@ class BatchTaskExecutor:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         log_line = f"[{timestamp}] {message}"
         
-        # 只输出到标准输出（由 executor 统一写入日志文件，避免重复）
+        if self.log_handler:
+            self.log_handler(log_line)
+            return
+        
         try:
             print(log_line, flush=True)
         except (UnicodeEncodeError, OSError):
-            # 如果输出失败，尝试 ASCII 安全版本
             safe_line = log_line.encode('ascii', errors='replace').decode('ascii')
             print(safe_line, flush=True)
     
@@ -93,6 +80,9 @@ class BatchTaskExecutor:
             progress: 进度百分比 (0-100)
             message: 进度消息
         """
+        if self.progress_handler:
+            self.progress_handler(progress, message)
+        
         progress_line = f"PROGRESS: {progress} - {message}"
         self.write_log(progress_line)
     
@@ -152,120 +142,171 @@ class BatchTaskExecutor:
     
     def _execute_task(self) -> int:
         """
-        执行具体任务逻辑（需要实现）
-        
-        返回:
-            int: 退出码，0 表示成功，非0 表示失败
+        执行具体任务逻辑：调用外部脚本，由脚本自身处理节点与业务逻辑
         """
-        # TODO: 在这里实现具体的任务执行逻辑
-        # 示例：
-        # self.write_log("开始执行任务...")
-        # self.output_progress(10, "任务开始")
-        # 
-        # for idx, meta in enumerate(self.operator_metas, 1):
-        #     service_id = meta.get("service_id")
-        #     nodes = meta.get("nodes", [])
-        #     # 处理每个模块的节点
-        #     for node in nodes:
-        #         # 执行节点任务
-        #         pass
-        # 
-        # self.output_progress(100, "任务完成")
-        # return 0
+        extension_script = Path(__file__).with_name(EXTENSION_NAME)
+        if not extension_script.exists():
+            raise FileNotFoundError(f"未找到示例脚本: {extension_script}")
         
-        raise NotImplementedError("请在 _execute_task 方法中实现具体的任务执行逻辑")
+        self.write_log(f"开始执行外部脚本 {extension_script}")
+        self.output_progress(5, "初始化外部脚本")
+        
+        env_override = {
+            "BATCH_TASK_ID": str(self.task_id),
+            "BATCH_TASK_TYPE": self.task_type,
+            "BATCH_LOG_PATH": str(self.log_path),
+            "BATCH_OPERATOR_METAS": json.dumps(self.operator_metas, ensure_ascii=False),
+        }
+        
+        return_code = self._run_external_script(extension_script, env_override=env_override)
+
+        if return_code == 0:
+            self.output_progress(100, "外部脚本执行完成")
+            self.write_log("外部脚本执行结束，返回码 0")
+        else:
+            self.output_progress(100, f"外部脚本执行失败 ({return_code})")
+            self.write_log(f"[ERROR] 外部脚本执行失败，退出码: {return_code}")
+        
+        return return_code
+
+    def _run_external_script(
+        self,
+        script_path: Path,
+        *,
+        env_override: Optional[Dict[str, str]] = None,
+    ) -> int:
+        """
+        调用外部脚本并将输出写入日志
+        """
+        cmd = [sys.executable, str(script_path)]
+        env = os.environ.copy()
+        if env_override:
+            env.update({k: str(v) for k, v in env_override.items() if v is not None})
+        
+        self.write_log(f"调用外部脚本: {' '.join(cmd)}")
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            text=True,
+        )
+        
+        if process.stdout:
+            for raw_line in iter(process.stdout.readline, ''):
+                line = raw_line.rstrip('\r\n')
+                if line:
+                    self.write_log(f"[脚本输出] {line}")
+            process.stdout.close()
+        
+        return process.wait()
 
 
-# 注意：此脚本所有参数均从环境变量获取，不再使用命令行参数
-# 必需的环境变量：
-# - TASK_LOG_PATH: 日志文件路径
-# - TASK_ID: 任务ID
-# - TASK_TYPE: 任务类型 (deploy/restart)
-# - OPERATOR_METAS: 操作元数据（JSON字符串）
-# 或者使用 TASK_PARAMS_JSON 传递完整参数（JSON字符串，包含所有参数）
-
-
-def load_from_env() -> Dict[str, Any]:
+def execute_in_process(
+    *,
+    log_path: Path,
+    task_id: int,
+    task_type: str,
+    operator_metas: List[Dict],
+    log_handler: Optional[Callable[[str], None]] = None,
+    progress_handler: Optional[Callable[[int, str], None]] = None,
+) -> int:
     """
-    从环境变量加载参数
-    
-    返回:
-        Dict: 参数字典
+    在当前进程中执行批次任务
     """
-    params = {}
-    
-    if "TASK_LOG_PATH" in os.environ:
-        params["log_path"] = os.environ["TASK_LOG_PATH"]
-    
-    if "TASK_ID" in os.environ:
-        try:
-            params["task_id"] = int(os.environ["TASK_ID"])
-        except ValueError:
-            pass
-    
-    if "TASK_TYPE" in os.environ:
-        params["task_type"] = os.environ["TASK_TYPE"]
-    
-    if "OPERATOR_METAS" in os.environ:
-        try:
-            params["operator_metas"] = json.loads(os.environ["OPERATOR_METAS"])
-        except (json.JSONDecodeError, TypeError):
-            pass
-    
-    if "TASK_PARAMS_JSON" in os.environ:
-        try:
-            full_params = json.loads(os.environ["TASK_PARAMS_JSON"])
-            params.update(full_params)
-        except (json.JSONDecodeError, TypeError):
-            pass
-    
-    return params
-
-
-def main():
-    """主函数 - 所有参数从环境变量获取"""
-    # 从环境变量加载所有参数
-    params = load_from_env()
-    
-    # 提取参数
-    log_path_str = params.get("log_path")
-    task_id = params.get("task_id")
-    task_type = params.get("task_type")
-    operator_metas = params.get("operator_metas")
-    
-    # 验证必需参数
-    if not log_path_str:
-        print("[ERROR] 缺少必需环境变量: TASK_LOG_PATH", file=sys.stderr)
-        sys.exit(1)
-    
-    if task_id is None:
-        print("[ERROR] 缺少必需环境变量: TASK_ID", file=sys.stderr)
-        sys.exit(1)
-    
-    if not task_type:
-        print("[ERROR] 缺少必需环境变量: TASK_TYPE", file=sys.stderr)
-        sys.exit(1)
-    
-    if not operator_metas:
-        print("[ERROR] 缺少必需环境变量: OPERATOR_METAS 或 TASK_PARAMS_JSON", file=sys.stderr)
-        sys.exit(1)
-    
-    # 创建执行器
-    log_path = Path(log_path_str)
     executor = BatchTaskExecutor(
         log_path=log_path,
         task_id=task_id,
         task_type=task_type,
-        operator_metas=operator_metas
+        operator_metas=operator_metas,
+        log_handler=log_handler,
+        progress_handler=progress_handler,
+    )
+    return executor.execute()
+
+
+def execute_in_subprocess(
+    *,
+    log_path: Path,
+    task_id: int,
+    task_type: str,
+    operator_metas: List[Dict],
+    python_executable: Optional[str] = None,
+    base_dir: Optional[Path] = None,
+    extra_env: Optional[Dict[str, str]] = None,
+    log_handler: Optional[Callable[[str, str], None]] = None,
+) -> int:
+    """
+    通过 subprocess 执行脚本，并实时读取日志
+    
+    Args:
+        log_path: 日志文件路径
+        task_id: 任务ID
+        task_type: 任务类型
+        operator_metas: 操作元数据
+        python_executable: 指定 Python 解释器
+        base_dir: 工作目录
+        extra_env: 额外环境变量
+        log_handler: 日志回调 (source, line)
+    """
+    script_path = Path(__file__).resolve()
+    if python_executable is None:
+        python_executable = sys.executable
+    
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+    
+    params_dict = {
+        "log_path": str(log_path),
+        "task_id": task_id,
+        "task_type": task_type,
+        "operator_metas": operator_metas,
+    }
+    env["TASK_PARAMS_JSON"] = json.dumps(params_dict, ensure_ascii=False)
+    
+    cmd = [python_executable, str(script_path)]
+    
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=str(base_dir or script_path.parent),
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        text=True,
     )
     
-    # 执行任务
-    exit_code = executor.execute()
-    sys.exit(exit_code)
+    def _handle_output(stream, source):
+        for raw_line in iter(stream.readline, ''):
+            line = raw_line.rstrip('\r\n')
+            if not line:
+                continue
+            if log_handler:
+                log_handler(source, line)
+            else:
+                print(f"[{source}] {line}")
+    
+    threads = [
+        threading.Thread(target=_handle_output, args=(process.stdout, "stdout"), daemon=True),
+        threading.Thread(target=_handle_output, args=(process.stderr, "stderr"), daemon=True),
+    ]
+    
+    for thread in threads:
+        thread.start()
+    
+    return_code = process.wait()
+    
+    for thread in threads:
+        thread.join(timeout=1)
+    
+    return return_code
 
-
-if __name__ == "__main__":
-    main()
 
 
 

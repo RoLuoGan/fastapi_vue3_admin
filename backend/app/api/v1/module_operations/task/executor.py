@@ -5,16 +5,12 @@
 """
 
 import asyncio
-import random
 import uuid
-import subprocess
 import sys
-import os
-import json
-import re
+from importlib import import_module
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Tuple
 
 import aiofiles
 
@@ -117,7 +113,7 @@ class TaskExecutor:
         operator_metas: Optional[List[dict]] = None,
     ) -> None:
         """
-        执行批次任务（多个节点）- 使用 subprocess 执行外部脚本
+        执行批次任务（多个节点）- 通过 import_module 调用脚本逻辑
         
         Args:
             base_auth: 基础认证信息
@@ -174,110 +170,67 @@ class TaskExecutor:
                             "nodes": node_list,
                         })
                 
-                # 构建参数字典
-                params_dict = {
-                    "log_path": str(log_path),
-                    "task_id": task_id,
-                    "task_type": task_type,
-                    "operator_metas": script_operator_metas,
-                }
-                params_json = json.dumps(params_dict, ensure_ascii=False)
+                logger.info(f"导入批次任务脚本模块: {script_path}")
                 
-                # 构建命令（使用环境变量传递参数，避免命令行参数中的 JSON 解析问题）
-                python_exe = sys.executable
-                cmd = [
-                    python_exe,
-                    str(script_path),
-                ]
+                # 通过 import_module 导入脚本模块
+                if str(settings.BASE_DIR) not in sys.path:
+                    sys.path.append(str(settings.BASE_DIR))
+                module = import_module("scripts.execute_batch_task")
                 
-                # 设置环境变量（主要方式，避免 Windows 命令行参数解析问题）
-                env = os.environ.copy()
-                env["TASK_LOG_PATH"] = str(log_path)
-                env["TASK_ID"] = str(task_id)
-                env["TASK_TYPE"] = task_type
-                env["OPERATOR_METAS"] = json.dumps(script_operator_metas, ensure_ascii=False)
-                env["TASK_PARAMS_JSON"] = params_json
+                loop = asyncio.get_running_loop()
+                log_queue: asyncio.Queue[str] = asyncio.Queue()
+                progress_queue: asyncio.Queue[Optional[Tuple[int, str]]] = asyncio.Queue()
                 
-                logger.info(f"执行命令: {' '.join(cmd)}")
-                logger.info(f"脚本路径: {script_path}")
-                logger.info(f"Python可执行文件: {python_exe}")
-                logger.info(f"工作目录: {settings.BASE_DIR}")
+                def log_handler(message: str):
+                    loop.call_soon_threadsafe(log_queue.put_nowait, message)
                 
-                # 启动子进程（Windows 兼容）
-                if sys.platform == 'win32':
-                    # Windows 使用 shell=True 和字符串命令
-                    cmd_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in cmd)
-                    process = await asyncio.to_thread(
-                        subprocess.Popen,
-                        cmd_str,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        env=env,
-                        cwd=str(settings.BASE_DIR),
-                        shell=True,
-                        encoding='utf-8',
-                        errors='replace',
-                    )
-                else:
-                    # Linux/Mac 使用列表命令
-                    process = await asyncio.to_thread(
-                        subprocess.Popen,
-                        cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        env=env,
-                        cwd=str(settings.BASE_DIR),
-                        encoding='utf-8',
-                        errors='replace',
-                    )
+                def progress_handler(progress: int, message: str):
+                    loop.call_soon_threadsafe(progress_queue.put_nowait, (progress, message))
                 
-                await cls.write_log(log_path, f"脚本进程已启动，PID: {process.pid}")
-                
-                # 进度解析正则表达式
-                progress_pattern = re.compile(r'PROGRESS:\s*(\d+)\s*-\s*(.+)')
-                
-                # 实时读取输出
-                last_progress = 0
-                
-                async def read_output(stream, is_stderr=False):
-                    """异步读取输出流"""
-                    nonlocal last_progress
+                async def log_consumer():
                     while True:
-                        line = await asyncio.to_thread(stream.readline)
-                        if not line:
+                        line = await log_queue.get()
+                        if line is None:
                             break
-                        
-                        line = line.rstrip('\n\r')
-                        if not line:
-                            continue
-                        
-                        # 直接写入日志文件（脚本输出已包含时间戳，不再重复添加）
                         cls.ensure_log_dir()
-                        async with aiofiles.open(log_path, "a", encoding="utf-8", errors='replace') as log_file:
+                        async with aiofiles.open(log_path, "a", encoding="utf-8", errors="replace") as log_file:
                             await log_file.write(line + "\n")
-                        
-                        # 解析进度
-                        match = progress_pattern.search(line)
-                        if match:
-                            progress = int(match.group(1))
-                            message = match.group(2)
-                            if progress != last_progress:
-                                last_progress = progress
-                                await new_task_crud.update(
-                                    id=task_id,
-                                    data={"progress": min(progress, 99)}
-                                )
-                                await new_db.commit()
-                                logger.debug(f"任务进度更新: {progress}% - {message}")
                 
-                # 同时读取 stdout 和 stderr
-                await asyncio.gather(
-                    read_output(process.stdout, is_stderr=False),
-                    read_output(process.stderr, is_stderr=True),
-                )
+                async def progress_consumer():
+                    last_progress = 0
+                    while True:
+                        item = await progress_queue.get()
+                        if item is None:
+                            break
+                        progress, message = item
+                        if progress != last_progress:
+                            last_progress = progress
+                            await new_task_crud.update(
+                                id=task_id,
+                                data={"progress": min(progress, 99)}
+                            )
+                            await new_db.commit()
+                            logger.debug(f"任务进度更新: {progress}% - {message}")
                 
-                # 等待进程结束
-                return_code = await asyncio.to_thread(process.wait)
+                log_task = asyncio.create_task(log_consumer())
+                progress_task = asyncio.create_task(progress_consumer())
+                
+                def run_module():
+                    return module.execute_in_process(
+                        log_path=log_path,
+                        task_id=task_id,
+                        task_type=task_type,
+                        operator_metas=script_operator_metas,
+                        log_handler=log_handler,
+                        progress_handler=progress_handler,
+                    )
+                
+                try:
+                    return_code = await asyncio.to_thread(run_module)
+                finally:
+                    await log_queue.put(None)
+                    await progress_queue.put(None)
+                    await asyncio.gather(log_task, progress_task)
                 
                 # 根据返回码确定任务状态
                 if return_code == 0:
@@ -304,16 +257,6 @@ class TaskExecutor:
                 
             except asyncio.CancelledError:
                 await new_db.rollback()
-                if 'process' in locals():
-                    def terminate_process():
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
-                    await asyncio.to_thread(terminate_process)
-                
                 await cls.write_log(log_path, "批次任务被取消")
                 await new_task_crud.update(
                     id=task_id,
@@ -327,16 +270,6 @@ class TaskExecutor:
                 raise
             except Exception as exc:
                 await new_db.rollback()
-                if 'process' in locals():
-                    def terminate_process():
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
-                    await asyncio.to_thread(terminate_process)
-                
                 error_msg = f"批次任务执行异常: {exc}"
                 await cls.write_log(log_path, f"[ERROR] {error_msg}")
                 import traceback
