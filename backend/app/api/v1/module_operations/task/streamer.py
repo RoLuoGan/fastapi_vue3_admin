@@ -15,7 +15,6 @@ from typing import AsyncGenerator, Optional, Dict, Any, Tuple
 
 import aiofiles
 from redis.asyncio.client import Redis
-from fastapi import Request
 
 from app.config.setting import settings
 from app.core.database import AsyncSessionLocal
@@ -131,7 +130,7 @@ class TaskLogStreamer:
         auth: AuthSchema,
         task_id: int,
         last_event_id: Optional[str] = None,
-        request: Optional[Request] = None,
+        redis: Optional[Redis] = None,
     ) -> AsyncGenerator[str, None]:
         """
         生成任务日志SSE流（分布式版本）
@@ -145,7 +144,7 @@ class TaskLogStreamer:
             auth: 认证信息
             task_id: 任务ID
             last_event_id: 最后事件ID，用于断点续传（格式: task_{task_id}_{seq}）
-            request: FastAPI Request 对象（用于获取 Redis 连接）
+            redis: Redis 连接对象（可选，通过依赖注入传入）
         
         Yields:
             SSE格式的字符串
@@ -153,11 +152,7 @@ class TaskLogStreamer:
         request_id = str(uuid.uuid4())
         logger.info(f"[SSE] 开始生成任务日志流 task_id={task_id}, request_id={request_id}")
         
-        # 获取 Redis 连接
-        redis = None
-        if request and hasattr(request.app.state, 'redis'):
-            redis = request.app.state.redis
-        
+        # Redis 连接已通过依赖注入传入
         try:
             # 获取任务信息
             task = await TaskCRUD(auth).get_by_id_crud(id=task_id)

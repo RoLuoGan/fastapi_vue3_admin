@@ -5,10 +5,11 @@
 
 from fastapi import APIRouter, Depends, Body, Path, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from redis.asyncio.client import Redis
 
 from app.common.response import SuccessResponse
 from app.core.router_class import OperationLogRoute
-from app.core.dependencies import AuthPermission, get_current_user_by_query
+from app.core.dependencies import AuthPermission, get_current_user_by_query, redis_getter
 from app.core.base_params import PaginationQueryParam
 from app.core.logger import logger
 from app.api.v1.module_system.auth.schema import AuthSchema
@@ -25,6 +26,7 @@ router = APIRouter(route_class=OperationLogRoute, prefix="/node", tags=["任务�
 @router.post("/execute", summary="执行任务", description="统一的任务执行接口（部署/重启）- 支持多模块多节点")
 async def execute_task_controller(
     data: ExecuteTaskSchema,
+    redis: Redis = Depends(redis_getter),
     auth: AuthSchema = Depends(AuthPermission(["operations:node:deploy", "operations:node:restart"])),
 ) -> JSONResponse:
     logger.info(f"收到任务请求 - 操作类型: {data.operator_type}, 模块数: {len(data.operator_metas)}")
@@ -33,7 +35,8 @@ async def execute_task_controller(
     result = await TaskService.execute_task_service(
         operator_metas=data.operator_metas,
         task_type=data.operator_type,
-        auth=auth
+        auth=auth,
+        redis=redis,
     )
     
     task_name = "部署" if data.operator_type == "deploy" else "重启"
@@ -102,6 +105,7 @@ async def delete_task_controller(
 async def stream_task_log_controller(
     request: Request,
     task_id: int = Path(..., description="任务ID"),
+    redis: Redis = Depends(redis_getter),
     auth: AuthSchema = Depends(get_current_user_by_query),
 ) -> StreamingResponse:
     permission_checker = AuthPermission(["operations:task:log"], check_data_scope=False)
@@ -117,7 +121,7 @@ async def stream_task_log_controller(
         auth=auth,
         task_id=task_id,
         last_event_id=last_event_id,
-        request=request,  # 传递 request 对象以获取 Redis 连接
+        redis=redis,  # 使用 redis_getter 依赖注入获取 Redis 连接
     )
     
     return StreamingResponse(

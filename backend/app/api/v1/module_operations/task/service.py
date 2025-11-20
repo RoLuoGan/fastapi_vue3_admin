@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import aiofiles
+from redis.asyncio.client import Redis
 
 from app.core.exceptions import CustomException
 from app.core.logger import logger
@@ -183,7 +184,13 @@ class TaskService:
                     logger.warning(f"删除任务日志失败 {path}: {exc}")
 
     @classmethod
-    async def execute_task_service(cls, auth: AuthSchema, operator_metas: List[Any], task_type: str) -> Dict:
+    async def execute_task_service(
+        cls,
+        auth: AuthSchema,
+        operator_metas: List[Any],
+        task_type: str,
+        redis: Optional[Redis] = None,
+    ) -> Dict:
         """
         执行任务 - 统一的任务执行入口
         
@@ -260,6 +267,7 @@ class TaskService:
                 nodes=nodes,
                 task_type=task_type,
                 operator_metas=validated_metas,  # 传递验证后的 operator_metas
+                redis=redis,
             )
         )
 
@@ -279,7 +287,7 @@ class TaskService:
         auth: AuthSchema,
         task_id: int,
         last_event_id: Optional[str] = None,
-        request: Optional[Any] = None,
+        redis: Optional[Any] = None,
     ) -> AsyncGenerator[str, None]:
         """
         任务日志流服务
@@ -292,6 +300,6 @@ class TaskService:
             auth=auth,
             task_id=task_id,
             last_event_id=last_event_id,
-            request=request,
+            redis=redis,
         )
 

@@ -15,7 +15,6 @@ from typing import Optional, List, Any, Dict, Tuple
 
 import aiofiles
 from redis.asyncio.client import Redis
-from redis import exceptions
 
 from app.config.setting import settings
 from app.core.database import AsyncSessionLocal
@@ -58,33 +57,6 @@ class TaskExecutor:
         cls.ensure_log_dir()
         async with aiofiles.open(log_path, "a", encoding="utf-8", errors="replace") as log_file:
             await log_file.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
-    
-    @classmethod
-    async def _get_redis_connection(cls) -> Optional[Redis]:
-        """
-        获取 Redis 连接
-        
-        Returns:
-            Redis 连接，如果 Redis 未启用则返回 None
-        """
-        if not settings.REDIS_ENABLE:
-            return None
-        
-        try:
-            redis = await Redis.from_url(
-                url=settings.REDIS_URI,
-                encoding='utf-8',
-                decode_responses=True,
-                health_check_interval=20,
-                max_connections=settings.POOL_SIZE,
-                socket_timeout=settings.POOL_TIMEOUT
-            )
-            # 测试连接
-            await redis.ping()
-            return redis
-        except Exception as e:
-            logger.warning(f"获取 Redis 连接失败: {e}")
-            return None
     
     @classmethod
     async def write_log_to_storage(
@@ -208,6 +180,7 @@ class TaskExecutor:
         nodes: List[Any],
         task_type: str,
         operator_metas: Optional[List[dict]] = None,
+        redis: Optional[Redis] = None,
     ) -> None:
         """
         执行批次任务（多个节点）- 通过 import_module 调用脚本逻辑
@@ -219,14 +192,15 @@ class TaskExecutor:
             nodes: 节点列表
             task_type: 任务类型 (deploy/restart)
             operator_metas: 操作元数据（可选），格式: [{"service_id": 1, "nodes": [node_obj, ...]}, ...]
+            redis: 复用的 Redis 连接（可选，通过依赖注入获取）
         """
         async with AsyncSessionLocal() as new_db:
             new_auth = AuthSchema(db=new_db, user=base_auth.user, check_data_scope=False)
             new_task_crud = TaskCRUD(new_auth)
             new_log_crud = TaskLogCRUD(new_auth)
             
-            # 获取 Redis 连接
-            redis = await cls._get_redis_connection()
+            if settings.REDIS_ENABLE and redis is None:
+                logger.warning("[Executor] 未提供 Redis 连接，将跳过 Redis Stream 写入")
             
             # 初始化 seq 计数器（从 MySQL 获取最大 seq）
             current_seq = await new_log_crud.get_max_seq_crud(task_id=task_id)
