@@ -98,7 +98,7 @@ async def delete_task_controller(
     return SuccessResponse(msg="删除任务成功")
 
 
-@router.get("/task/{task_id}/stream", summary="任务日志流", description="任务日志SSE流")
+@router.get("/task/{task_id}/stream", summary="任务日志流", description="任务日志SSE流（支持分布式）")
 async def stream_task_log_controller(
     request: Request,
     task_id: int = Path(..., description="任务ID"),
@@ -117,6 +117,7 @@ async def stream_task_log_controller(
         auth=auth,
         task_id=task_id,
         last_event_id=last_event_id,
+        request=request,  # 传递 request 对象以获取 Redis 连接
     )
     
     return StreamingResponse(

@@ -7,17 +7,24 @@
 
 import asyncio
 import json
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import AsyncGenerator, Optional, Dict, Any, Tuple
 
 import aiofiles
+from redis.asyncio.client import Redis
+from fastapi import Request
 
+from app.config.setting import settings
 from app.core.database import AsyncSessionLocal
 from app.core.logger import logger
+from app.core.exceptions import CustomException
 from app.api.v1.module_system.auth.schema import AuthSchema
 from .crud import TaskCRUD
+from .log_crud import TaskLogCRUD
+from .redis_stream import TaskLogRedisStream
 
 
 class TaskLogStreamer:
@@ -96,30 +103,27 @@ class TaskLogStreamer:
         return default_timestamp, raw
 
     @staticmethod
-    def parse_last_event_id(last_event_id: str, task_id: int) -> Tuple[int, int]:
+    def parse_last_event_id(last_event_id: str, task_id: int) -> int:
         """
-        解析 last_event_id，获取初始位置和行号
+        解析 last_event_id，获取最后读取的 seq
         
-        格式: task_{task_id}_{line_number}
+        格式: task_{task_id}_{seq} 或 task_{task_id}_{line_number}（兼容旧格式）
+        
+        Returns:
+            最后读取的 seq，如果没有则返回 0
         """
-        initial_position = 0
-        initial_line_number = 0
-        
         if not last_event_id:
-            return initial_position, initial_line_number
+            return 0
         
         try:
             if last_event_id.startswith(f"task_{task_id}_"):
-                line_number_str = last_event_id.replace(f"task_{task_id}_", "")
-                initial_line_number = max(int(line_number_str), 0)
+                seq_str = last_event_id.replace(f"task_{task_id}_", "")
+                return max(int(seq_str), 0)
             else:
-                # 兼容旧格式（纯数字位置）
-                initial_position = max(int(float(last_event_id)), 0)
+                # 兼容旧格式（纯数字）
+                return max(int(float(last_event_id)), 0)
         except (ValueError, TypeError):
-            initial_position = 0
-            initial_line_number = 0
-        
-        return initial_position, initial_line_number
+            return 0
 
     @classmethod
     async def stream_task_log(
@@ -127,14 +131,21 @@ class TaskLogStreamer:
         auth: AuthSchema,
         task_id: int,
         last_event_id: Optional[str] = None,
+        request: Optional[Request] = None,
     ) -> AsyncGenerator[str, None]:
         """
-        生成任务日志SSE流
+        生成任务日志SSE流（分布式版本）
+        
+        流程：
+        1. 先从 MySQL 读取历史日志（根据 last_seq）
+        2. 然后订阅 Redis Stream 实时日志
+        3. 使用 seq 全局序号确保无重复、无缺失
         
         Args:
             auth: 认证信息
             task_id: 任务ID
-            last_event_id: 最后事件ID，用于断点续传
+            last_event_id: 最后事件ID，用于断点续传（格式: task_{task_id}_{seq}）
+            request: FastAPI Request 对象（用于获取 Redis 连接）
         
         Yields:
             SSE格式的字符串
@@ -142,16 +153,21 @@ class TaskLogStreamer:
         request_id = str(uuid.uuid4())
         logger.info(f"[SSE] 开始生成任务日志流 task_id={task_id}, request_id={request_id}")
         
+        # 获取 Redis 连接
+        redis = None
+        if request and hasattr(request.app.state, 'redis'):
+            redis = request.app.state.redis
+        
         try:
             # 获取任务信息
             task = await TaskCRUD(auth).get_by_id_crud(id=task_id)
-            if not task or not task.log_path:
-                logger.warning(f"[SSE] 任务不存在或未生成日志 task_id={task_id}")
+            if not task:
+                logger.warning(f"[SSE] 任务不存在 task_id={task_id}")
                 event_str = cls.format_sse_event(
                     "task_error",
                     {
                         "taskId": f"task_{task_id}",
-                        "message": "任务不存在或未生成日志",
+                        "message": "任务不存在",
                     },
                     event_id=f"task_{task_id}_0",
                     request_id=request_id,
@@ -160,16 +176,12 @@ class TaskLogStreamer:
                 await asyncio.sleep(0)
                 return
 
-            log_path = Path(task.log_path)
-            initial_position, initial_line_number = cls.parse_last_event_id(last_event_id or "", task_id)
-            logger.info(f"[SSE] 日志路径: {log_path}, 初始位置: {initial_position}, 初始行号: {initial_line_number}")
-            
-            # 如果使用行号定位，需要计算文件位置
-            if initial_line_number > 0 and log_path.exists():
-                async with aiofiles.open(log_path, "r", encoding="utf-8") as f:
-                    for _ in range(initial_line_number):
-                        await f.readline()
-                    initial_position = await f.tell()
+            # 解析 last_event_id，获取最后读取的 seq
+            last_seq = cls.parse_last_event_id(last_event_id or "", task_id)
+            logger.info(f"[SSE] 任务日志流 task_id={task_id}, last_seq={last_seq}")
+
+            # 初始化 last_seq（用于异常处理）
+            current_seq = last_seq
 
             # 发送初始连接确认事件
             logger.info(f"[SSE] 发送初始连接确认事件 task_id={task_id}")
@@ -177,7 +189,7 @@ class TaskLogStreamer:
                 "task_info",
                 {
                     "taskId": f"task_{task_id}",
-                    "lineNumber": 0,
+                    "seq": 0,
                     "content": "日志流连接已建立",
                 },
                 event_id=f"task_{task_id}_0",
@@ -185,202 +197,291 @@ class TaskLogStreamer:
                 request_id=request_id,
             )
             yield event_str.encode("utf-8")
-            await asyncio.sleep(0)  # 让出控制权，确保立即发送
+            await asyncio.sleep(0)
 
-            file = None
-            position = initial_position
-            line_number = initial_line_number
-            inactive_cycles = 0
-            info_notified = False
-            last_info_time = 0
+            # 步骤1: 从 MySQL 读取历史日志（last_seq 之后的所有日志）
+            log_crud = TaskLogCRUD(auth)
+            logger.debug(f"[SSE] 开始从 MySQL 读取历史日志 task_id={task_id}, last_seq={last_seq}")
+            mysql_logs = await log_crud.get_logs_after_seq_crud(
+                task_id=task_id,
+                last_seq=last_seq,
+                limit=None,  # 读取所有历史日志
+            )
             
-            logger.info(f"[SSE] 进入主循环 task_id={task_id}")
-            while True:
-                # 读取日志文件
-                if log_path.exists():
-                    if file is None or file.closed:
-                        current_size = log_path.stat().st_size
-                        if position > current_size:
-                            position = current_size
-                        
-                        # 如果position不在文件开头，确保从UTF-8字符边界开始读取
-                        if position > 0:
-                            with open(log_path, "rb") as bin_file:
-                                bin_file.seek(position)
-                                lookback = min(256, position)
-                                bin_file.seek(max(0, position - lookback))
-                                chunk = bin_file.read(lookback + 10)
-                                last_newline = chunk.rfind(b"\n")
-                                if last_newline >= 0:
-                                    position = max(0, position - lookback + last_newline + 1)
-                                    # 重新计算行号
-                                    if position > 0:
-                                        try:
-                                            with open(log_path, "r", encoding="utf-8") as f:
-                                                line_count = 0
-                                                while True:
-                                                    line = f.readline()
-                                                    if not line:
-                                                        break
-                                                    line_count += 1
-                                                    if f.tell() >= position:
-                                                        break
-                                                line_number = line_count
-                                        except Exception:
-                                            pass
-                                else:
-                                    position = max(0, position - lookback)
-                        
-                        file = open(log_path, "r", encoding="utf-8")
-                        file.seek(position)
+            logger.info(f"[SSE] 从 MySQL 读取到 {len(mysql_logs)} 条历史日志记录")
+            
+            # 发送历史日志
+            total_lines_sent = 0
+            for log_record in mysql_logs:
+                # 将日志内容按行分割
+                lines = log_record.content.split('\n')
+                logger.debug(f"[SSE] MySQL 日志记录 seq={log_record.seq}, 包含 {len(lines)} 行")
+                
+                for line_idx, line in enumerate(lines):
+                    if not line.strip():
+                        continue
                     
-                    # 逐行读取，每次只读取一行，立即推送
-                    line = file.readline()
-                    if line:
-                        position = file.tell()
-                        line_number += 1
-                        inactive_cycles = 0
-                        timestamp_str, message = cls.parse_log_line(line)
+                    # 为每一行生成唯一的 event_id，避免去重问题
+                    event_id = f"task_{task_id}_{log_record.seq}_{line_idx}"
+                    
+                    event_str = cls.format_sse_event(
+                        "task_log",
+                        {
+                            "taskId": f"task_{task_id}",
+                            "seq": log_record.seq,
+                            "content": line,
+                        },
+                        event_id=event_id,
+                        timestamp=log_record.timestamp or int(datetime.now().timestamp()),
+                        request_id=request_id,
+                    )
+                    
+                    logger.debug(f"[SSE] 发送 MySQL 历史日志行 seq={log_record.seq}, line_idx={line_idx}, event_id={event_id}")
+                    yield event_str.encode("utf-8")
+                    total_lines_sent += 1
+                    await asyncio.sleep(0)  # 让出控制权，确保立即发送
+                
+                # 更新 current_seq
+                current_seq = log_record.seq
+            
+            logger.info(f"[SSE] MySQL 历史日志发送完成，共发送 {total_lines_sent} 行")
+
+            # 步骤2: 订阅 Redis Stream 实时日志
+            if redis:
+                logger.info(f"[SSE] 开始订阅 Redis Stream 实时日志 task_id={task_id}, current_seq={current_seq}")
+                
+                # 先读取 Redis Stream 中可能已有的日志（在 MySQL 写入和 Redis 写入之间的日志）
+                logger.debug(f"[SSE] 读取 Redis Stream 中已有的日志 task_id={task_id}, last_seq={current_seq}")
+                redis_logs = await TaskLogRedisStream.read_logs(
+                    redis=redis,
+                    task_id=task_id,
+                    last_seq=current_seq,
+                )
+                
+                logger.info(f"[SSE] Redis Stream 中已有 {len(redis_logs)} 条日志记录")
+                
+                # 发送 Redis Stream 中已有的日志
+                redis_lines_sent = 0
+                for log_data in redis_logs:
+                    lines = log_data["content"].split('\n')
+                    logger.debug(f"[SSE] Redis Stream 日志记录 seq={log_data['seq']}, 包含 {len(lines)} 行")
+                    
+                    for line_idx, line in enumerate(lines):
+                        if not line.strip():
+                            continue
                         
-                        # 转换时间戳为Unix时间戳（秒）
-                        try:
-                            dt = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
-                            timestamp = int(dt.timestamp())
-                        except (ValueError, TypeError):
-                            timestamp = int(datetime.now().timestamp())
+                        # 为每一行生成唯一的 event_id，避免去重问题
+                        event_id = f"task_{task_id}_{log_data['seq']}_{line_idx}"
                         
-                        # 发送日志事件（立即推送，不等待）
                         event_str = cls.format_sse_event(
                             "task_log",
                             {
                                 "taskId": f"task_{task_id}",
-                                "lineNumber": line_number,
-                                "content": message,
+                                "seq": log_data["seq"],
+                                "content": line,
                             },
-                            event_id=f"task_{task_id}_{line_number}",
-                            timestamp=timestamp,
+                            event_id=event_id,
+                            timestamp=log_data["timestamp"],
                             request_id=request_id,
                         )
+                        
+                        logger.debug(f"[SSE] 发送 Redis Stream 已有日志行 seq={log_data['seq']}, line_idx={line_idx}, event_id={event_id}")
                         yield event_str.encode("utf-8")
+                        redis_lines_sent += 1
                         await asyncio.sleep(0)  # 让出控制权，确保立即发送
-                        info_notified = True
-                        # 继续读取下一行，不sleep，实现实时推送
-                        continue
-                    else:
-                        # 没有新行，检查文件是否有新内容
-                        current_file_size = log_path.stat().st_size
-                        if position < current_file_size:
-                            # 文件有新内容但还没有换行符，关闭文件等待下次读取
-                            if file and not file.closed:
-                                file.close()
-                                file = None
-                else:
-                    # 日志文件不存在，定期发送提示信息（每10秒一次）
-                    current_time = datetime.now().timestamp()
-                    if not info_notified or (current_time - last_info_time) >= 10:
-                        event_str = cls.format_sse_event(
-                            "task_info",
-                            {
-                                "taskId": f"task_{task_id}",
-                                "lineNumber": line_number + 1,
-                                "content": "日志文件尚未生成，等待任务写入日志…",
-                            },
-                            event_id=f"task_{task_id}_{line_number + 1}",
-                            timestamp=int(current_time),
-                            request_id=request_id,
-                        )
-                        yield event_str.encode("utf-8")
-                        await asyncio.sleep(0)  # 让出控制权，确保立即发送
-                        info_notified = True
-                        last_info_time = current_time
+                    
+                    # 更新 current_seq
+                    current_seq = log_data["seq"]
                 
-                # 没有新行时，短暂等待后继续检查（减少延迟，提高实时性）
-                inactive_cycles += 1
-                await asyncio.sleep(0.1)  # 从1秒改为0.1秒，提高实时性
-
-                # 定期检查任务状态（每5秒检查一次，0.1秒 * 50 = 5秒）
-                if inactive_cycles % 50 == 0:
-                    async with AsyncSessionLocal() as new_db:
-                        new_auth = AuthSchema(db=new_db, user=auth.user, check_data_scope=False)
-                        fresh_task = await TaskCRUD(new_auth).get_by_id_crud(id=task_id)
-
-                    if not fresh_task:
-                        event_str = cls.format_sse_event(
-                            "task_error",
-                            {
-                                "taskId": f"task_{task_id}",
-                                "lineNumber": line_number + 1,
-                                "content": "任务已删除",
-                            },
-                            event_id=f"task_{task_id}_{line_number + 1}",
-                            request_id=request_id,
-                        )
-                        yield event_str.encode("utf-8")
-                        await asyncio.sleep(0)
-                        break
-
-                    if fresh_task.task_status in ("success", "failed"):
-                        # 发送任务状态更新事件
-                        event_str = cls.format_sse_event(
-                            "task_status",
-                            {
-                                "taskId": f"task_{task_id}",
-                                "taskStatus": fresh_task.task_status,
-                                "progress": fresh_task.progress or 0,
-                                "errorMessage": fresh_task.error_message,
-                            },
-                            event_id=f"task_{task_id}_{line_number + 1}",
-                            request_id=request_id,
-                        )
-                        yield event_str.encode("utf-8")
-                        await asyncio.sleep(0)
+                logger.info(f"[SSE] Redis Stream 已有日志发送完成，共发送 {redis_lines_sent} 行")
+                
+                # 订阅新的实时日志
+                logger.info(f"[SSE] 开始订阅 Redis Stream 新日志 task_id={task_id}, current_seq={current_seq}")
+                realtime_lines_sent = 0
+                last_status_check_time = time.time()
+                STATUS_CHECK_INTERVAL = 2.0  # 每 2 秒检查一次任务状态
+                task_finished = False
+                
+                # 定义任务状态检查函数
+                async def check_task_status_func() -> bool:
+                    """检查任务是否已完成"""
+                    nonlocal task_finished, last_status_check_time
+                    current_time = time.time()
+                    if current_time - last_status_check_time >= STATUS_CHECK_INTERVAL:
+                        last_status_check_time = current_time
+                        try:
+                            async with AsyncSessionLocal() as new_db:
+                                new_auth = AuthSchema(db=new_db, user=auth.user, check_data_scope=False)
+                                fresh_task = await TaskCRUD(new_auth).get_by_id_crud(id=task_id)
+                            
+                            if fresh_task and fresh_task.task_status in ("success", "failed", "partial_success"):
+                                task_finished = True
+                                return True
+                        except Exception as e:
+                            logger.warning(f"[SSE] 检查任务状态失败 task_id={task_id}: {e}")
+                    return False
+                
+                try:
+                    async for log_data in TaskLogRedisStream.subscribe_logs(
+                        redis=redis,
+                        task_id=task_id,
+                        last_seq=current_seq,
+                        check_task_status=check_task_status_func,
+                    ):
+                        logger.debug(f"[SSE] 收到 Redis Stream 实时日志 seq={log_data['seq']}, timestamp={log_data['timestamp']}")
                         
-                        # 发送结束事件
-                        status_text = "完成" if fresh_task.task_status == "success" else "失败"
-                        event_str = cls.format_sse_event(
-                            "task_end",
-                            {
-                                "taskId": f"task_{task_id}",
-                                "lineNumber": line_number + 2,
-                                "content": f"任务已{status_text}",
-                            },
-                            event_id=f"task_{task_id}_{line_number + 2}",
-                            request_id=request_id,
-                        )
-                        yield event_str.encode("utf-8")
-                        await asyncio.sleep(0)
-                        break
-
-                # 长时间无新日志，结束推送（0.1秒 * 600 = 60秒）
-                if inactive_cycles > 600:
-                    event_str = cls.format_sse_event(
-                        "task_end",
-                        {
-                            "taskId": f"task_{task_id}",
-                            "lineNumber": line_number + 1,
-                            "content": "长时间无新日志，结束推送",
-                        },
-                        event_id=f"task_{task_id}_{line_number + 1}",
-                        request_id=request_id,
-                    )
-                    yield event_str.encode("utf-8")
-                    await asyncio.sleep(0)
-                    break
+                        lines = log_data["content"].split('\n')
+                        logger.debug(f"[SSE] Redis Stream 实时日志记录 seq={log_data['seq']}, 包含 {len(lines)} 行")
                         
+                        for line_idx, line in enumerate(lines):
+                            if not line.strip():
+                                continue
+                            
+                            # 为每一行生成唯一的 event_id，避免去重问题
+                            # 使用时间戳确保实时日志的唯一性
+                            event_id = f"task_{task_id}_{log_data['seq']}_{line_idx}_{int(time.time() * 1000)}"
+                            
+                            event_str = cls.format_sse_event(
+                                "task_log",
+                                {
+                                    "taskId": f"task_{task_id}",
+                                    "seq": log_data["seq"],
+                                    "content": line,
+                                },
+                                event_id=event_id,
+                                timestamp=log_data["timestamp"],
+                                request_id=request_id,
+                            )
+                            
+                            logger.debug(f"[SSE] 立即发送实时日志行 seq={log_data['seq']}, line_idx={line_idx}, event_id={event_id}, content_preview={line[:50]}")
+                            yield event_str.encode("utf-8")
+                            realtime_lines_sent += 1
+                            await asyncio.sleep(0)  # 让出控制权，确保立即发送
+                            logger.debug(f"[SSE] 实时日志行已发送 seq={log_data['seq']}, line_idx={line_idx}")
+                        
+                        # 更新 current_seq
+                        current_seq = log_data["seq"]
+                        logger.debug(f"[SSE] 更新 current_seq={current_seq}")
+                        
+                        # 每次收到日志后都检查任务状态（因为任务可能在日志写入后立即完成）
+                        current_time = time.time()
+                        if current_time - last_status_check_time >= STATUS_CHECK_INTERVAL or current_seq % 10 == 0:
+                            last_status_check_time = current_time
+                            async with AsyncSessionLocal() as new_db:
+                                new_auth = AuthSchema(db=new_db, user=auth.user, check_data_scope=False)
+                                fresh_task = await TaskCRUD(new_auth).get_by_id_crud(id=task_id)
+                            
+                            if fresh_task and fresh_task.task_status in ("success", "failed", "partial_success"):
+                                logger.info(f"[SSE] 检测到任务已完成 task_id={task_id}, status={fresh_task.task_status}")
+                                task_finished = True
+                                
+                                # 发送任务状态更新事件
+                                event_str = cls.format_sse_event(
+                                    "task_status",
+                                    {
+                                        "taskId": f"task_{task_id}",
+                                        "taskStatus": fresh_task.task_status,
+                                        "progress": fresh_task.progress or 0,
+                                        "errorMessage": fresh_task.error_message,
+                                    },
+                                    event_id=f"task_{task_id}_{current_seq + 1}",
+                                    request_id=request_id,
+                                )
+                                yield event_str.encode("utf-8")
+                                await asyncio.sleep(0)
+                                
+                                # 发送结束事件
+                                status_text = "完成" if fresh_task.task_status == "success" else "失败"
+                                event_str = cls.format_sse_event(
+                                    "task_end",
+                                    {
+                                        "taskId": f"task_{task_id}",
+                                        "seq": current_seq + 2,
+                                        "content": f"任务已{status_text}",
+                                    },
+                                    event_id=f"task_{task_id}_{current_seq + 2}",
+                                    request_id=request_id,
+                                )
+                                yield event_str.encode("utf-8")
+                                await asyncio.sleep(0)
+                                logger.info(f"[SSE] 任务已完成，中断 Redis Stream 订阅 task_id={task_id}")
+                                break
+                    
+                    # 如果任务已完成（通过 check_task_status_func 检测），发送结束事件
+                    if task_finished:
+                        logger.info(f"[SSE] 任务已完成，退出 Redis Stream 订阅循环 task_id={task_id}")
+                        # 再次确认任务状态并发送结束事件
+                        async with AsyncSessionLocal() as new_db:
+                            new_auth = AuthSchema(db=new_db, user=auth.user, check_data_scope=False)
+                            fresh_task = await TaskCRUD(new_auth).get_by_id_crud(id=task_id)
+                        
+                        if fresh_task:
+                            # 发送任务状态更新事件
+                            event_str = cls.format_sse_event(
+                                "task_status",
+                                {
+                                    "taskId": f"task_{task_id}",
+                                    "taskStatus": fresh_task.task_status,
+                                    "progress": fresh_task.progress or 0,
+                                    "errorMessage": fresh_task.error_message,
+                                },
+                                event_id=f"task_{task_id}_{current_seq + 1}",
+                                request_id=request_id,
+                            )
+                            yield event_str.encode("utf-8")
+                            await asyncio.sleep(0)
+                            
+                            # 发送结束事件
+                            status_text = "完成" if fresh_task.task_status == "success" else "失败"
+                            event_str = cls.format_sse_event(
+                                "task_end",
+                                {
+                                    "taskId": f"task_{task_id}",
+                                    "seq": current_seq + 2,
+                                    "content": f"任务已{status_text}",
+                                },
+                                event_id=f"task_{task_id}_{current_seq + 2}",
+                                request_id=request_id,
+                            )
+                            yield event_str.encode("utf-8")
+                            await asyncio.sleep(0)
+                        
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"[SSE] 订阅 Redis Stream 失败 task_id={task_id}: {e}")
+            else:
+                # 如果没有 Redis，回退到文件读取模式（兼容旧逻辑）
+                logger.warning(f"[SSE] Redis 未启用，回退到文件读取模式 task_id={task_id}")
+                # 这里可以保留原有的文件读取逻辑作为降级方案
+                event_str = cls.format_sse_event(
+                    "task_info",
+                    {
+                        "taskId": f"task_{task_id}",
+                        "seq": current_seq + 1,
+                        "content": "Redis 未启用，无法获取实时日志",
+                    },
+                    event_id=f"task_{task_id}_{current_seq + 1}",
+                    request_id=request_id,
+                )
+                yield event_str.encode("utf-8")
+                await asyncio.sleep(0)
+        
         except asyncio.CancelledError:
             logger.info(f"[SSE] 任务日志流被取消 task_id={task_id}")
             raise
         except Exception as exc:
             logger.error(f"[SSE] 推送任务日志失败 task_id={task_id}: {exc}", exc_info=True)
             try:
+                current_seq_value = current_seq if 'current_seq' in locals() else 0
                 event_str = cls.format_sse_event(
                     "task_error",
                     {
                         "taskId": f"task_{task_id}",
-                        "lineNumber": line_number + 1,
+                        "seq": current_seq_value + 1,
                         "content": f"日志推送异常: {exc}",
                     },
-                    event_id=f"task_{task_id}_{line_number + 1}",
+                    event_id=f"task_{task_id}_{current_seq_value + 1}",
                     request_id=request_id,
                 )
                 yield event_str.encode("utf-8")
@@ -388,7 +489,5 @@ class TaskLogStreamer:
             except Exception as e:
                 logger.error(f"[SSE] 发送错误事件失败: {e}")
         finally:
-            if file and not file.closed:
-                file.close()
             logger.info(f"[SSE] 任务日志流结束 task_id={task_id}")
 

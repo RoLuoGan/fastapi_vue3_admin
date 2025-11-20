@@ -76,7 +76,7 @@ def run_demo(operator_metas: List[Dict[str, Any]]) -> None:
             
             for idx, step in enumerate(steps, 1):
                 log(f"    步骤 {idx}/{len(steps)}: {step}")
-                time.sleep(0.2)
+                time.sleep(2)
             
             log(f"  - 节点 {node_ip}:{node_port} Demo 流程完成")
             processed_nodes += 1

@@ -276,32 +276,32 @@ function appendSystemLog(message: string, type: LogEntry["type"] = "system") {
 function handleSSEEvent(event: MessageEvent, defaultType: LogEntry["type"] = "log"): void {
   const rawData = event.data;
   
+  console.log("[SSE] handleSSEEvent 被调用, rawData:", rawData, "defaultType:", defaultType);
+  
   if (!rawData || (typeof rawData === "string" && rawData.trim().length === 0)) {
+    console.warn("[SSE] 事件数据为空");
     return;
   }
   
   let data: any;
   try {
     data = JSON.parse(rawData);
+    console.log("[SSE] 解析后的数据:", data);
   } catch (error) {
-    // 兼容旧格式：纯文本处理
-    const entryId = event.lastEventId || `${defaultType}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-    appendLogEntry({
-      id: entryId,
-      timestamp: nowTimestamp(),
-      message: String(rawData).trim(),
-      type: defaultType,
-    });
+    console.error("[SSE] 解析事件数据失败:", error, rawData);
     return;
   }
 
   if (!data || typeof data !== "object" || Array.isArray(data)) {
+    console.warn("[SSE] 数据格式不正确:", data);
     return;
   }
 
   const eventType = data.type;
   const payload = data.payload || {};
   const timestampRaw = data.timestamp;
+  
+  console.log("[SSE] 事件类型:", eventType, "payload:", payload);
 
   // 处理任务状态更新事件
   if (eventType === "task_status") {
@@ -334,7 +334,10 @@ function handleSSEEvent(event: MessageEvent, defaultType: LogEntry["type"] = "lo
 
   // 处理日志类事件（task_log, task_info, task_error, task_end）
   const message = payload.content || payload.message || payload.data || "";
+  console.log("[SSE] 提取的消息内容:", message, "payload:", payload);
+  
   if (!message || (typeof message === "string" && message.trim().length === 0)) {
+    console.warn("[SSE] 消息内容为空，跳过处理");
     return;
   }
 
@@ -343,12 +346,30 @@ function handleSSEEvent(event: MessageEvent, defaultType: LogEntry["type"] = "lo
       ? `${event.lastEventId}`
       : `${eventType}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`);
 
+  // 优先从日志内容中提取时间戳（格式: [2025-11-20 12:19:06] ...）
   let timestamp: string;
-  if (timestampRaw && typeof timestampRaw === "number") {
+  const messageStr = String(message).trim();
+  
+  // 尝试从日志内容中提取时间戳（支持多种格式）
+  // 格式1: [2025-11-20 12:19:06] ...
+  // 格式2: [脚本输出] [2025-11-20 12:19:06] ...
+  // 使用全局匹配，取最后一个时间戳（最接近实际日志时间）
+  const timestampMatches = messageStr.matchAll(/\[(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\]/g);
+  const allMatches = Array.from(timestampMatches);
+  let hasTimestampInMessage = false;
+  
+  if (allMatches.length > 0) {
+    // 取最后一个时间戳（最接近实际日志时间）
+    const lastMatch = allMatches[allMatches.length - 1];
+    timestamp = normalizeTimestamp(lastMatch[1]);
+    hasTimestampInMessage = true;
+  } else if (timestampRaw && typeof timestampRaw === "number") {
+    // 使用事件的时间戳
     const date = new Date(timestampRaw * 1000);
     timestamp = normalizeTimestamp(date.toISOString());
   } else {
-    timestamp = normalizeTimestamp(timestampRaw);
+    // 使用当前时间
+    timestamp = normalizeTimestamp(timestampRaw) || nowTimestamp();
   }
 
   // 映射事件类型到前端日志类型
@@ -371,12 +392,27 @@ function handleSSEEvent(event: MessageEvent, defaultType: LogEntry["type"] = "lo
     stopTaskDetailRefresh();
   }
 
-  appendLogEntry({
+  // 如果日志内容已经包含时间戳，从消息中移除时间戳部分，避免重复显示
+  let displayMessage = String(message).trim();
+  if (hasTimestampInMessage && allMatches.length > 0) {
+    // 移除消息中所有的时间戳部分（保留其他内容）
+    // 例如: [2025-11-20 12:19:06] [脚本输出] [2025-11-20 12:19:06] 消息内容
+    // 变成: [脚本输出] 消息内容
+    displayMessage = displayMessage.replace(/\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\]\s*/g, "");
+    // 清理多余的空格
+    displayMessage = displayMessage.trim();
+  }
+  
+  const logEntry = {
     id: entryId,
     timestamp,
-    message: String(message).trim(),
+    message: displayMessage,
     type: logType,
-  });
+  };
+  
+  console.log("[SSE] 准备添加日志条目:", logEntry);
+  appendLogEntry(logEntry);
+  console.log("[SSE] 日志条目已添加，当前日志行数:", logLines.value.length);
 }
 
 // ==================== SSE连接管理 ====================
@@ -443,63 +479,101 @@ function startLogStream() {
     }
   });
 
-  // 通用message事件监听器（作为后备，处理没有event类型的事件）
-  source.onmessage = (event: MessageEvent) => {
-    console.log("[SSE] 收到message事件（通用）:", event);
+  // 统一处理标准化的SSE事件
+  source.addEventListener("task_log", (event) => {
+    console.log("[SSE] 收到task_log事件:", event);
     try {
-      handleSSEEvent(event, "log");
+      handleSSEEvent(event as MessageEvent, "log");
+    } catch (error) {
+      console.error("[SSE] 处理task_log事件失败:", error, event);
+    }
+  });
+
+  source.addEventListener("task_status", (event) => {
+    console.log("[SSE] 收到task_status事件:", event);
+    try {
+      handleSSEEvent(event as MessageEvent);
+    } catch (error) {
+      console.error("[SSE] 处理task_status事件失败:", error, event);
+    }
+  });
+
+  source.addEventListener("task_info", (event) => {
+    console.log("[SSE] 收到task_info事件:", event);
+    try {
+      handleSSEEvent(event as MessageEvent, "info");
+    } catch (error) {
+      console.error("[SSE] 处理task_info事件失败:", error, event);
+    }
+  });
+
+  source.addEventListener("task_error", (event) => {
+    console.log("[SSE] 收到task_error事件:", event);
+    try {
+      handleSSEEvent(event as MessageEvent, "error");
+    } catch (error) {
+      console.error("[SSE] 处理task_error事件失败:", error, event);
+    }
+  });
+
+  source.addEventListener("task_end", (event) => {
+    console.log("[SSE] 收到task_end事件:", event);
+    try {
+      handleSSEEvent(event as MessageEvent, "end");
+    } catch (error) {
+      console.error("[SSE] 处理task_end事件失败:", error, event);
+    }
+  });
+
+  // 添加通用的 message 事件监听器作为后备（处理没有 event 类型的事件）
+  source.onmessage = (event: MessageEvent) => {
+    console.log("[SSE] 收到message事件（通用）:", event, "data:", event.data);
+    try {
+      // 尝试从数据中解析事件类型
+      const rawData = event.data;
+      if (rawData) {
+        try {
+          const data = JSON.parse(rawData);
+          console.log("[SSE] message事件解析后的数据:", data);
+          if (data && data.type) {
+            // 根据类型调用对应的处理函数
+            const defaultType = data.type === "task_log" ? "log" : "log";
+            handleSSEEvent(event, defaultType);
+          } else {
+            handleSSEEvent(event, "log");
+          }
+        } catch (e) {
+          console.warn("[SSE] message事件数据解析失败:", e, rawData);
+        }
+      }
     } catch (error) {
       console.error("[SSE] 处理message事件失败:", error, event);
     }
   };
 
-  // 统一处理标准化的SSE事件
-  source.addEventListener("task_log", (event) => {
-    console.log("[SSE] 收到task_log事件:", event);
-    handleSSEEvent(event as MessageEvent, "log");
-  });
-
-  source.addEventListener("task_status", (event) => {
-    console.log("[SSE] 收到task_status事件:", event);
-    handleSSEEvent(event as MessageEvent);
-  });
-
-  source.addEventListener("task_info", (event) => {
-    console.log("[SSE] 收到task_info事件:", event);
-    handleSSEEvent(event as MessageEvent, "info");
-  });
-
-  source.addEventListener("task_error", (event) => {
-    console.log("[SSE] 收到task_error事件:", event);
-    handleSSEEvent(event as MessageEvent, "error");
-  });
-
-  source.addEventListener("task_end", (event) => {
-    console.log("[SSE] 收到task_end事件:", event);
-    handleSSEEvent(event as MessageEvent, "end");
-  });
-
-  // 兼容旧格式的事件监听器
-  source.addEventListener("log", (event) => {
-    console.log("[SSE] 收到log事件:", event);
-    handleSSEEvent(event as MessageEvent, "log");
-  });
-
-  source.addEventListener("status", (event) => {
-    console.log("[SSE] 收到status事件:", event);
-    handleSSEEvent(event as MessageEvent);
-  });
-
-  source.addEventListener("info", (event) => {
-      handleSSEEvent(event as MessageEvent, "info");
-  });
-
-  source.addEventListener("end", (event) => {
-    handleSSEEvent(event as MessageEvent, "end");
-    if (taskDetail.value && !taskDetail.value.task_status) {
-      taskDetail.value.task_status = "success";
+  // 添加通用的 message 事件监听器作为后备（处理没有 event 类型的事件）
+  source.onmessage = (event: MessageEvent) => {
+    console.log("[SSE] 收到message事件（通用）:", event);
+    try {
+      // 尝试从数据中解析事件类型
+      const rawData = event.data;
+      if (rawData) {
+        try {
+          const data = JSON.parse(rawData);
+          if (data && data.type) {
+            // 根据类型调用对应的处理函数
+            handleSSEEvent(event, data.type === "task_log" ? "log" : "log");
+          } else {
+            handleSSEEvent(event, "log");
+          }
+        } catch (e) {
+          console.warn("[SSE] message事件数据解析失败:", e, rawData);
+        }
+      }
+    } catch (error) {
+      console.error("[SSE] 处理message事件失败:", error, event);
     }
-  });
+  };
 
   source.addEventListener("error", (event) => {
     console.log("[SSE] 收到error事件:", {

@@ -97,3 +97,22 @@ class TaskModel(CreatorMixin):
     idc: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="机房")
     module_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="模块分组")
 
+
+class TaskLogModel(CreatorMixin):
+    """
+    任务日志表 - 用于存储任务日志（支持分布式）
+    使用 seq 全局序号避免重复/缺失日志
+    """
+    __tablename__ = "operations_task_log"
+    __table_args__ = ({'comment': '任务日志表'})
+    __loader_options__ = ["creator"]
+
+    # 关联字段
+    task_id: Mapped[int] = mapped_column(Integer, ForeignKey("operations_task.id", ondelete="CASCADE"), nullable=False, index=True, comment="任务ID")
+    
+    # 日志字段
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, index=True, comment="全局序号，用于避免重复/缺失日志")
+    content: Mapped[str] = mapped_column(Text, nullable=False, comment="日志内容（支持多行，每1000行一条记录）")
+    line_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="本条记录包含的行数")
+    timestamp: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True, comment="Unix时间戳（秒）")
+

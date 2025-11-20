@@ -279,6 +279,7 @@ class TaskService:
         auth: AuthSchema,
         task_id: int,
         last_event_id: Optional[str] = None,
+        request: Optional[Any] = None,
     ) -> AsyncGenerator[str, None]:
         """
         任务日志流服务
@@ -291,5 +292,6 @@ class TaskService:
             auth=auth,
             task_id=task_id,
             last_event_id=last_event_id,
+            request=request,
         )
 
