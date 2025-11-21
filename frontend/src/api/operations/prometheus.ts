@@ -29,7 +29,6 @@ export interface PrometheusEndpointItem {
   endpoint: string;
   is_enabled?: boolean;
   scheme?: string;
-  metrics_path?: string;
 }
 
 export interface PrometheusJobDetail {
@@ -37,8 +36,6 @@ export interface PrometheusJobDetail {
   job_name: string;
   description?: string;
   is_enabled: boolean;
-  scrape_interval?: string | null;
-  honor_labels: boolean;
   endpoints: PrometheusEndpointItem[];
   labels: PrometheusLabelItem[];
 }
@@ -46,6 +43,15 @@ export interface PrometheusJobDetail {
 export interface PrometheusJobQuery {
   job_name?: string;
   is_enabled?: boolean | null;
+}
+
+// 导入导出使用的简化格式
+export interface PrometheusJobExport {
+  job_name: string;
+  description?: string;
+  is_enabled: boolean;
+  endpoints: string[]; // 简化格式：字符串数组
+  labels: PrometheusLabelItem[];
 }
 
 const PrometheusAPI = {
@@ -84,16 +90,30 @@ const PrometheusAPI = {
     });
   },
   exportJobs() {
-    return request<ApiResponse<PrometheusJobDetail[]>>({
+    return request<ApiResponse<PrometheusJobExport[]>>({
       url: `${API_PREFIX}/job/export`,
       method: "get",
     });
   },
-  importJobs(data: { overwrite: boolean; jobs: PrometheusJobDetail[] }) {
+  importJobs(data: { overwrite: boolean; jobs: PrometheusJobExport[] }) {
     return request<ApiResponse>({
       url: `${API_PREFIX}/job/import`,
       method: "post",
       data,
+    });
+  },
+  toggleJobStatus(jobId: number, isEnabled: boolean) {
+    return request<ApiResponse>({
+      url: `${API_PREFIX}/job/${jobId}/toggle-status`,
+      method: "patch",
+      data: { is_enabled: isEnabled },
+    });
+  },
+  toggleEndpointStatus(endpointId: number, isEnabled: boolean) {
+    return request<ApiResponse>({
+      url: `${API_PREFIX}/endpoint/${endpointId}/toggle-status`,
+      method: "patch",
+      data: { is_enabled: isEnabled },
     });
   },
 };

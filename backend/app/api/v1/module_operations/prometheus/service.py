@@ -6,7 +6,7 @@ Prometheus 配置业务逻辑（运维模块）
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 
 from app.core.exceptions import CustomException
@@ -25,6 +25,7 @@ from .schema import (
     PrometheusTreeEndpointSchema,
     PrometheusConfigImportSchema,
     PrometheusHttpSdItemSchema,
+    PrometheusEndpointItem,
 )
 
 
@@ -70,7 +71,7 @@ class PrometheusService:
         return tree
 
     @classmethod
-    async def create_job_service(cls, auth: AuthSchema, data: PrometheusJobCreateSchema) -> PrometheusJobDetailSchema:
+    async def create_job_service(cls, auth: AuthSchema, data: PrometheusJobCreateSchema, auto_commit: bool = True) -> PrometheusJobDetailSchema:
         crud = PrometheusJobCRUD(auth)
         existing = await crud.get_by_name_crud(job_name=data.job_name)
         if existing:
@@ -80,8 +81,6 @@ class PrometheusService:
             job_name=data.job_name.strip(),
             description=data.description,
             is_enabled=data.is_enabled,
-            scrape_interval=data.scrape_interval,
-            honor_labels=data.honor_labels,
         )
 
         for endpoint in data.endpoints:
@@ -93,7 +92,6 @@ class PrometheusService:
                     endpoint=endpoint_value,
                     is_enabled=endpoint.is_enabled,
                     scheme=endpoint.scheme,
-                    metrics_path=endpoint.metrics_path,
                 )
             )
 
@@ -106,7 +104,9 @@ class PrometheusService:
         auth.db.add(job)
         await auth.db.flush()
         await auth.db.refresh(job)
-        await auth.db.commit()
+        
+        if auto_commit:
+            await auth.db.commit()
 
         logger.info(f"[Prometheus] 创建 Job: {job.job_name}")
         return PrometheusJobDetailSchema.model_validate(job)
@@ -120,7 +120,7 @@ class PrometheusService:
         return PrometheusJobDetailSchema.model_validate(job)
 
     @classmethod
-    async def update_job_service(cls, auth: AuthSchema, job_id: int, data: PrometheusJobUpdateSchema) -> PrometheusJobDetailSchema:
+    async def update_job_service(cls, auth: AuthSchema, job_id: int, data: PrometheusJobUpdateSchema, auto_commit: bool = True) -> PrometheusJobDetailSchema:
         crud = PrometheusJobCRUD(auth)
         job = await crud.get_with_children_crud(job_id=job_id)
         if not job:
@@ -134,10 +134,17 @@ class PrometheusService:
         job.job_name = data.job_name.strip()
         job.description = data.description
         job.is_enabled = data.is_enabled
-        job.scrape_interval = data.scrape_interval
-        job.honor_labels = data.honor_labels
 
+        # 显式删除旧的 endpoints 和 labels，避免唯一约束冲突
+        await auth.db.execute(delete(PrometheusEndpointModel).where(PrometheusEndpointModel.job_id == job_id))
+        await auth.db.execute(delete(PrometheusLabelModel).where(PrometheusLabelModel.job_id == job_id))
+        await auth.db.flush()
+
+        # 清空关系集合
         job.endpoints.clear()
+        job.labels.clear()
+
+        # 添加新的 endpoints
         for endpoint in data.endpoints:
             endpoint_value = endpoint.endpoint.strip()
             if not endpoint_value:
@@ -147,19 +154,20 @@ class PrometheusService:
                     endpoint=endpoint_value,
                     is_enabled=endpoint.is_enabled,
                     scheme=endpoint.scheme,
-                    metrics_path=endpoint.metrics_path,
                 )
             )
         if not job.endpoints:
             raise CustomException(msg="至少需要配置一个有效的 Endpoint")
 
-        job.labels.clear()
+        # 添加新的 labels
         for label in data.labels:
             job.labels.append(PrometheusLabelModel(label_key=label.key, label_value=label.value))
 
         await auth.db.flush()
         await auth.db.refresh(job)
-        await auth.db.commit()
+        
+        if auto_commit:
+            await auth.db.commit()
 
         logger.info(f"[Prometheus] 更新 Job: {job.job_name}")
         return PrometheusJobDetailSchema.model_validate(job)
@@ -175,6 +183,39 @@ class PrometheusService:
         logger.info(f"[Prometheus] 删除 Job: {ids}")
 
     @classmethod
+    async def toggle_job_status_service(cls, auth: AuthSchema, job_id: int, is_enabled: bool) -> PrometheusJobDetailSchema:
+        """切换 Job 启用/禁用状态"""
+        crud = PrometheusJobCRUD(auth)
+        job = await crud.get_with_children_crud(job_id=job_id)
+        if not job:
+            raise CustomException(msg="Job 不存在")
+        
+        job.is_enabled = is_enabled
+        await auth.db.flush()
+        await auth.db.commit()
+        
+        logger.info(f"[Prometheus] {'启用' if is_enabled else '禁用'} Job: {job.job_name}")
+        return PrometheusJobDetailSchema.model_validate(job)
+
+    @classmethod
+    async def toggle_endpoint_status_service(cls, auth: AuthSchema, endpoint_id: int, is_enabled: bool) -> None:
+        """切换 Endpoint 启用/禁用状态"""
+        from sqlalchemy import select
+        
+        stmt = select(PrometheusEndpointModel).where(PrometheusEndpointModel.id == endpoint_id)
+        result = await auth.db.execute(stmt)
+        endpoint = result.scalars().first()
+        
+        if not endpoint:
+            raise CustomException(msg="Endpoint 不存在")
+        
+        endpoint.is_enabled = is_enabled
+        await auth.db.flush()
+        await auth.db.commit()
+        
+        logger.info(f"[Prometheus] {'启用' if is_enabled else '禁用'} Endpoint: {endpoint.endpoint}")
+
+    @classmethod
     async def export_job_config_service(cls, auth: AuthSchema) -> List[Dict[str, Any]]:
         crud = PrometheusJobCRUD(auth)
         jobs = await crud.list_with_children_crud(job_name=None, is_enabled=None)
@@ -183,46 +224,109 @@ class PrometheusService:
             export_data.append(
                 {
                     "job_name": job.job_name,
-                    "description": job.description,
+                    "description": job.description or "",
                     "is_enabled": job.is_enabled,
-                    "scrape_interval": job.scrape_interval,
-                    "honor_labels": job.honor_labels,
-                    "endpoints": [
-                        {
-                            "endpoint": endpoint.endpoint,
-                            "is_enabled": endpoint.is_enabled,
-                            "scheme": endpoint.scheme,
-                            "metrics_path": endpoint.metrics_path,
-                        }
-                        for endpoint in job.endpoints
-                    ],
+                    "endpoints": [endpoint.endpoint for endpoint in job.endpoints],
                     "labels": [{"key": label.label_key, "value": label.label_value} for label in job.labels],
                 }
             )
         return export_data
 
     @classmethod
-    async def import_job_config_service(cls, auth: AuthSchema, data: PrometheusConfigImportSchema) -> Dict[str, Any]:
+    async def import_job_config_service(cls, auth: AuthSchema, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        导入 Job 配置（支持简化格式）
+        
+        简化格式示例：
+        {
+            "overwrite": false,
+            "jobs": [
+                {
+                    "job_name": "node_exporter",
+                    "description": "",
+                    "is_enabled": true,
+                    "endpoints": ["192.168.1.1", "192.168.1.2"],
+                    "labels": [{"key": "a", "value": "123"}]
+                }
+            ]
+        }
+        """
         crud = PrometheusJobCRUD(auth)
         created, updated = 0, 0
+        overwrite = data.get("overwrite", False)
+        jobs_data = data.get("jobs", [])
 
-        for job_payload in data.jobs:
-            exists = await crud.get_by_name_crud(job_name=job_payload.job_name)
+        for job_dict in jobs_data:
+            job_name = job_dict.get("job_name")
+            if not job_name:
+                raise CustomException(msg="Job 名称不能为空")
+            
+            # 处理简化格式：endpoints 可能是字符串数组或对象数组
+            endpoints = job_dict.get("endpoints", [])
+            if endpoints and isinstance(endpoints[0], str):
+                # 简化格式：endpoints 是字符串数组
+                endpoints_list = [
+                    PrometheusEndpointItem(
+                        endpoint=ep.strip(),
+                        is_enabled=True,
+                        scheme="http"
+                    )
+                    for ep in endpoints
+                    if ep and ep.strip()
+                ]
+            else:
+                # 标准格式：endpoints 是对象数组
+                endpoints_list = [
+                    PrometheusEndpointItem(
+                        endpoint=ep.get("endpoint", "").strip(),
+                        is_enabled=ep.get("is_enabled", True),
+                        scheme=ep.get("scheme", "http")
+                    )
+                    for ep in endpoints
+                    if ep.get("endpoint", "").strip()
+                ]
+            
+            if not endpoints_list:
+                raise CustomException(msg=f"Job {job_name} 至少需要一个有效的 Endpoint")
+            
+            # 处理 labels
+            labels_data = job_dict.get("labels", [])
+            labels_list = [
+                {"key": label.get("key", ""), "value": label.get("value", "")}
+                for label in labels_data
+                if label.get("key") and label.get("value")
+            ]
+            
+            job_data = PrometheusJobCreateSchema(
+                job_name=job_name.strip(),
+                description=job_dict.get("description", "") or "",
+                is_enabled=job_dict.get("is_enabled", True),
+                endpoints=endpoints_list,
+                labels=labels_list
+            )
+            
+            exists = await crud.get_by_name_crud(job_name=job_data.job_name)
             if exists:
-                if not data.overwrite:
-                    raise CustomException(msg=f"Job {job_payload.job_name} 已存在，如需覆盖请勾选覆盖选项")
-                await cls.update_job_service(auth, exists.id, PrometheusJobUpdateSchema(**job_payload.model_dump()))
+                if not overwrite:
+                    raise CustomException(msg=f"Job {job_data.job_name} 已存在，如需覆盖请勾选覆盖选项")
+                await cls.update_job_service(auth, exists.id, PrometheusJobUpdateSchema(**job_data.model_dump()), auto_commit=False)
                 updated += 1
             else:
-                await cls.create_job_service(auth, PrometheusJobCreateSchema(**job_payload.model_dump()))
+                await cls.create_job_service(auth, job_data, auto_commit=False)
                 created += 1
 
+        # 批量处理完成后统一提交
+        await auth.db.commit()
         return {"created": created, "updated": updated}
 
     @classmethod
-    async def http_sd_config_service(cls, db: Optional[AsyncSession] = None) -> List[PrometheusHttpSdItemSchema]:
+    async def http_sd_config_service(cls, job_name: str, db: Optional[AsyncSession] = None) -> List[PrometheusHttpSdItemSchema]:
         """
         Prometheus HTTP SD 输出
+        
+        参数:
+        - job_name (str): Job 名称，用于过滤
+        - db (Optional[AsyncSession]): 数据库会话，如果为 None 则创建新会话
         """
 
         close_session = False
@@ -237,7 +341,10 @@ class PrometheusService:
                     selectinload(PrometheusJobModel.endpoints),
                     selectinload(PrometheusJobModel.labels),
                 )
-                .where(PrometheusJobModel.is_enabled.is_(True))
+                .where(
+                    PrometheusJobModel.is_enabled.is_(True),
+                    PrometheusJobModel.job_name == job_name
+                )
             )
             result = await db.execute(stmt)
             jobs = result.scalars().all()
@@ -245,8 +352,6 @@ class PrometheusService:
             sd_items: List[PrometheusHttpSdItemSchema] = []
             for job in jobs:
                 label_dict = {label.label_key: label.label_value for label in job.labels}
-                label_dict["job"] = job.job_name
-
                 for endpoint in job.endpoints:
                     if not endpoint.is_enabled:
                         continue
@@ -254,12 +359,7 @@ class PrometheusService:
                     if not target_value:
                         continue
                     labels = dict(label_dict)
-                    labels["endpoint_id"] = endpoint.id
-                    labels["job_id"] = job.id
-                    if endpoint.scheme:
-                        labels["__scheme__"] = endpoint.scheme
-                    if endpoint.metrics_path:
-                        labels["__metrics_path__"] = endpoint.metrics_path
+                    # 只保留用户自定义标签，不包含 endpoint_id、job_id、__scheme__、__metrics_path__
                     sd_items.append(
                         PrometheusHttpSdItemSchema(
                             targets=[target_value],

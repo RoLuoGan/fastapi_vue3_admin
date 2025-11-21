@@ -22,7 +22,6 @@ class PrometheusEndpointItem(BaseModel):
     endpoint: str = Field(..., min_length=1, description="目标地址，如 10.0.0.1:9100")
     is_enabled: bool = Field(default=True, description="是否启用")
     scheme: str = Field(default="http", description="协议（http/https）")
-    metrics_path: str = Field(default="/metrics", description="采集路径")
 
 
 class PrometheusJobBaseSchema(BaseModel):
@@ -31,8 +30,6 @@ class PrometheusJobBaseSchema(BaseModel):
     job_name: str = Field(..., min_length=1, description="Job 名称")
     description: Optional[str] = Field(default=None, description="描述")
     is_enabled: bool = Field(default=True, description="是否启用")
-    scrape_interval: Optional[str] = Field(default=None, description="抓取间隔")
-    honor_labels: bool = Field(default=False, description="是否保留标签")
     endpoints: List[PrometheusEndpointItem] = Field(..., min_length=1, description="Endpoint 列表")
     labels: List[PrometheusLabelItem] = Field(default_factory=list, description="标签列表")
 
@@ -58,7 +55,6 @@ class PrometheusEndpointOutSchema(BaseModel):
     endpoint: str = Field(..., description="Endpoint")
     is_enabled: bool = Field(default=True, description="是否启用")
     scheme: str = Field(default="http", description="协议")
-    metrics_path: str = Field(default="/metrics", description="采集路径")
 
 
 class PrometheusLabelOutSchema(BaseModel):
@@ -76,8 +72,6 @@ class PrometheusJobDetailSchema(BaseSchema):
 
     job_name: str = Field(..., description="Job 名称")
     is_enabled: bool = Field(default=True, description="是否启用")
-    scrape_interval: Optional[str] = Field(default=None, description="抓取间隔")
-    honor_labels: bool = Field(default=False, description="是否保留标签")
     endpoints: List[PrometheusEndpointOutSchema] = Field(default_factory=list, description="Endpoint 列表")
     labels: List[PrometheusLabelItem] = Field(default_factory=list, description="标签列表")
 
@@ -93,8 +87,6 @@ class PrometheusJobDetailSchema(BaseSchema):
                 "job_name": getattr(values, "job_name", None),
                 "description": getattr(values, "description", None),
                 "is_enabled": getattr(values, "is_enabled", True),
-                "scrape_interval": getattr(values, "scrape_interval", None),
-                "honor_labels": getattr(values, "honor_labels", False),
                 "endpoints": getattr(values, "endpoints", []) or [],
                 "labels": getattr(values, "labels", []) or [],
                 "created_at": getattr(values, "created_at", None),
@@ -134,6 +126,23 @@ class PrometheusConfigImportSchema(BaseModel):
 
     overwrite: bool = Field(default=False, description="是否覆盖同名 Job")
     jobs: List[PrometheusJobCreateSchema] = Field(..., min_length=1, description="Job 配置列表")
+
+
+class PrometheusJobExportSchema(BaseModel):
+    """Job 导出格式（简化）"""
+
+    job_name: str = Field(..., description="Job 名称")
+    description: Optional[str] = Field(default=None, description="描述")
+    is_enabled: bool = Field(default=True, description="是否启用")
+    endpoints: List[str] = Field(..., min_length=1, description="Endpoint 列表（字符串数组）")
+    labels: List[PrometheusLabelItem] = Field(default_factory=list, description="标签列表")
+
+
+class PrometheusConfigImportSimpleSchema(BaseModel):
+    """JSON 导入（简化格式）"""
+
+    overwrite: bool = Field(default=False, description="是否覆盖同名 Job")
+    jobs: List[PrometheusJobExportSchema] = Field(..., min_length=1, description="Job 配置列表")
 
 
 class PrometheusHttpSdItemSchema(BaseModel):

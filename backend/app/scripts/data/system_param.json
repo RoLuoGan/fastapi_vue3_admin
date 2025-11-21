@@ -151,5 +151,14 @@
     "status": true,
     "description": "运维任务日志保留天数配置",
     "creator_id": 1
+  },
+  {
+    "config_name": "Prometheus HTTP SD API Key",
+    "config_key": "prometheus_http_sd_api_key",
+    "config_value": "",
+    "config_type": false,
+    "status": true,
+    "description": "Prometheus HTTP SD 接口访问密钥，用于 Prometheus 自动发现配置",
+    "creator_id": 1
   }
 ]

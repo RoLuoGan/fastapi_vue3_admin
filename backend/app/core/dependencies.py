@@ -134,6 +134,72 @@ async def get_current_user_by_query(
     return await _build_auth_schema(request=request, token=token, db=db, redis=redis)
 
 
+async def verify_api_key(
+    api_key: str,
+    config_key_name: str,
+    redis: Redis,
+) -> None:
+    """
+    通用 API Key 验证方法（内部函数）
+    
+    参数:
+    - api_key (str): 待验证的 API Key
+    - config_key_name (str): 系统配置中的配置键名
+    - redis (Redis): Redis 连接
+    
+    异常:
+    - CustomException: API Key 无效时抛出 401 错误
+    """
+    if not api_key:
+        raise CustomException(msg="API Key 不能为空", code=10401, status_code=401)
+    
+    if not config_key_name:
+        raise CustomException(msg="配置键名不能为空", code=10401, status_code=401)
+    
+    # 从 Redis 获取配置的 API Key
+    config_key = f"{RedisInitKeyConfig.SYSTEM_CONFIG.key}:{config_key_name}"
+    config_data = await RedisCURD(redis).get(config_key)
+    
+    if not config_data:
+        raise CustomException(msg=f"API Key 配置不存在（配置键：{config_key_name}），请联系管理员配置", code=10401, status_code=401)
+    
+    try:
+        config_dict = json.loads(config_data)
+        configured_api_key = config_dict.get("config_value", "").strip()
+    except Exception as e:
+        logger.error(f"解析 API Key 配置失败: {e}")
+        raise CustomException(msg="API Key 配置解析失败", code=10401, status_code=401)
+    
+    if not configured_api_key:
+        raise CustomException(msg=f"API Key 未配置（配置键：{config_key_name}），请联系管理员配置", code=10401, status_code=401)
+    
+    if api_key != configured_api_key:
+        raise CustomException(msg="API Key 无效", code=10401, status_code=401)
+
+
+async def prometheus_http_sd_api_key(
+    request: Request,
+    api_key: str = Query(..., description="Prometheus HTTP SD API Key", alias="api_key"),
+    redis: Redis = Depends(redis_getter),
+) -> None:
+    """
+    Prometheus HTTP SD 接口 API Key 验证
+    
+    参数:
+    - request (Request): 请求对象
+    - api_key (str): API Key（从查询参数 api_key 获取）
+    - redis (Redis): Redis 连接
+    
+    异常:
+    - CustomException: API Key 无效时抛出 401 错误
+    """
+    await verify_api_key(
+        api_key=api_key,
+        config_key_name="prometheus_http_sd_api_key",
+        redis=redis
+    )
+
+
 class AuthPermission:
     """权限验证类"""
     

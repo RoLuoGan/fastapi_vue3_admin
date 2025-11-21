@@ -54,17 +54,36 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="启用" width="100" align="center">
+        <el-table-column label="启用" width="120" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.is_enabled ? 'success' : 'info'">
-              {{ row.is_enabled ? "启用" : "禁用" }}
-            </el-tag>
+            <el-switch
+              v-model="row.is_enabled"
+              inline-prompt
+              active-text="启用"
+              inactive-text="禁用"
+              :active-value="true"
+              :inactive-value="false"
+              @change="handleToggleStatus(row)"
+              :loading="row.toggleLoading"
+            />
           </template>
         </el-table-column>
 
-        <el-table-column label="标签" min-width="240" show-overflow-tooltip>
+        <el-table-column label="标签" min-width="240">
           <template #default="{ row }">
-            <span>{{ row.labels_text || "-" }}</span>
+            <div v-if="row.labels_text" class="tags-container">
+              <el-tag
+                v-for="(label, index) in parseLabels(row.labels_text)"
+                :key="index"
+                type="primary"
+                effect="plain"
+                size="small"
+                class="label-tag"
+              >
+                {{ label.key }}: {{ label.value }}
+              </el-tag>
+            </div>
+            <span v-else>-</span>
           </template>
         </el-table-column>
 
@@ -104,12 +123,6 @@
         <el-form-item label="启用">
           <el-switch v-model="jobDialog.form.is_enabled" />
         </el-form-item>
-        <el-form-item label="抓取间隔">
-          <el-input v-model="jobDialog.form.scrape_interval" placeholder="默认继承全局，如 15s" />
-        </el-form-item>
-        <el-form-item label="Honor Labels">
-          <el-switch v-model="jobDialog.form.honor_labels" />
-        </el-form-item>
         <el-form-item label="Endpoints" prop="endpointsText">
           <el-input
             v-model="jobDialog.form.endpointsText"
@@ -117,20 +130,40 @@
             :rows="4"
             placeholder="每行一个 Endpoint，例如 10.0.0.1:9100"
           />
-          <div class="text-xs text-gray-500 mt-1">自动使用 http 协议，路径 /metrics</div>
+          <div class="text-xs text-gray-500 mt-1">每行一个 Endpoint，自动使用 http 协议</div>
         </el-form-item>
         <el-form-item label="Labels">
           <div class="w-full">
-            <div v-for="(label, index) in jobDialog.form.labels" :key="index" class="flex gap-2 mb-2">
-              <el-input v-model="label.key" placeholder="key" />
-              <el-input v-model="label.value" placeholder="value" />
+            <div v-for="(label, index) in jobDialog.form.labels" :key="index" class="flex gap-2 mb-2 label-input-row">
+              <el-input v-model="label.key" placeholder="标签键" style="flex: 1" />
+              <el-input v-model="label.value" placeholder="标签值" style="flex: 1" />
               <el-button
-                icon="Minus"
+                type="danger"
                 @click="removeLabel(index)"
                 v-if="jobDialog.form.labels.length > 1"
-              />
+                circle
+              >
+                <el-icon><Minus /></el-icon>
+              </el-button>
             </div>
-            <el-button type="primary" link icon="Plus" @click="addLabel">新增标签</el-button>
+            <el-button type="primary" link @click="addLabel">
+              <el-icon><Plus /></el-icon>新增标签
+            </el-button>
+            <div v-if="jobDialog.form.labels.some(l => l.key && l.value)" class="mt-3">
+              <div class="text-xs text-gray-500 mb-2">预览：</div>
+              <div class="tags-preview">
+                <el-tag
+                  v-for="(label, index) in jobDialog.form.labels.filter(l => l.key && l.value)"
+                  :key="index"
+                  type="primary"
+                  effect="plain"
+                  size="small"
+                  class="label-tag"
+                >
+                  {{ label.key }}: {{ label.value }}
+                </el-tag>
+              </div>
+            </div>
           </div>
         </el-form-item>
       </el-form>
@@ -176,6 +209,7 @@ import {
   Download,
   Memo,
   Link,
+  Minus,
 } from "@element-plus/icons-vue";
 import PrometheusAPI, {
   type PrometheusTreeJob,
@@ -190,10 +224,12 @@ interface SearchForm {
 
 interface TableJobNode extends PrometheusTreeJob {
   type: "job";
+  toggleLoading?: boolean;
 }
 
 interface TableEndpointNode extends PrometheusTreeEndpoint {
   type: "endpoint";
+  toggleLoading?: boolean;
 }
 
 type TableRow = TableJobNode | TableEndpointNode;
@@ -214,8 +250,6 @@ const jobDialog = reactive({
     job_name: "",
     description: "",
     is_enabled: true,
-    scrape_interval: "",
-    honor_labels: false,
     endpointsText: "",
     labels: [{ key: "", value: "" }],
   },
@@ -248,6 +282,27 @@ const transformTree = (jobs: PrometheusTreeJob[]): TableRow[] => {
   }));
 };
 
+// 解析 labels_text 字符串为标签数组
+// 格式: key="value", key2="value2"
+const parseLabels = (labelsText: string): Array<{ key: string; value: string }> => {
+  if (!labelsText || !labelsText.trim()) {
+    return [];
+  }
+  
+  const labels: Array<{ key: string; value: string }> = [];
+  const regex = /(\w+)="([^"]+)"/g;
+  let match;
+  
+  while ((match = regex.exec(labelsText)) !== null) {
+    labels.push({
+      key: match[1],
+      value: match[2],
+    });
+  }
+  
+  return labels;
+};
+
 const loadData = async () => {
   try {
     loading.value = true;
@@ -272,8 +327,6 @@ const resetJobForm = () => {
     job_name: "",
     description: "",
     is_enabled: true,
-    scrape_interval: "",
-    honor_labels: false,
     endpointsText: "",
     labels: [{ key: "", value: "" }],
   };
@@ -294,8 +347,6 @@ const openEditDialog = async (row: TableJobNode) => {
     jobDialog.form.job_name = detail.job_name;
     jobDialog.form.description = detail.description || "";
     jobDialog.form.is_enabled = detail.is_enabled;
-    jobDialog.form.scrape_interval = detail.scrape_interval || "";
-    jobDialog.form.honor_labels = detail.honor_labels;
     jobDialog.form.endpointsText = (detail.endpoints || [])
       .map((endpoint) => endpoint.endpoint)
       .join("\n");
@@ -326,7 +377,6 @@ const normalizeJobPayload = (): PrometheusJobDetail => {
       endpoint,
       is_enabled: true,
       scheme: "http",
-      metrics_path: "/metrics",
     }));
 
   if (!endpoints.length) {
@@ -341,8 +391,6 @@ const normalizeJobPayload = (): PrometheusJobDetail => {
     job_name: jobDialog.form.job_name.trim(),
     description: jobDialog.form.description?.trim(),
     is_enabled: jobDialog.form.is_enabled,
-    scrape_interval: jobDialog.form.scrape_interval?.trim() || null,
-    honor_labels: jobDialog.form.honor_labels,
     endpoints,
     labels,
   };
@@ -430,6 +478,37 @@ const submitImport = async () => {
   }
 };
 
+const handleToggleStatus = async (row: TableRow) => {
+  const originalStatus = row.is_enabled;
+  try {
+    // 设置加载状态
+    row.toggleLoading = true;
+    
+    if (row.type === "job") {
+      await PrometheusAPI.toggleJobStatus(row.id as number, row.is_enabled);
+      ElMessage.success(`${row.is_enabled ? "启用" : "禁用"}成功`);
+    } else {
+      // endpoint 的 id 可能是复合 ID，需要提取真实 ID
+      const endpointId = typeof row.id === "string" ? parseInt(row.id.replace("endpoint-", "")) : (row.id as number);
+      await PrometheusAPI.toggleEndpointStatus(endpointId, row.is_enabled);
+      ElMessage.success(`${row.is_enabled ? "启用" : "禁用"}成功`);
+    }
+    
+    // 刷新数据
+    await loadData();
+  } catch (error: any) {
+    // 恢复原状态
+    row.is_enabled = originalStatus;
+    if (error?.message) {
+      ElMessage.error(error.message);
+    } else {
+      ElMessage.error("状态更新失败");
+    }
+  } finally {
+    row.toggleLoading = false;
+  }
+};
+
 onMounted(() => {
   loadData();
 });
@@ -448,6 +527,52 @@ onMounted(() => {
 }
 .text-gray-500 {
   color: #6b7280;
+}
+
+/* 标签容器样式 */
+.tags-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.label-tag {
+  margin: 0;
+  font-size: 12px;
+  border-radius: 4px;
+  padding: 2px 8px;
+  border: 1px solid #409eff;
+  color: #409eff;
+  background-color: #ecf5ff;
+}
+
+.label-tag:hover {
+  background-color: #d9ecff;
+}
+
+/* 标签输入行样式 */
+.label-input-row {
+  align-items: flex-start;
+}
+
+/* 标签预览样式 */
+.tags-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  background-color: #f5f7fa;
+  border-radius: 4px;
+  border: 1px dashed #dcdfe6;
+}
+
+.mt-3 {
+  margin-top: 12px;
+}
+
+.mb-2 {
+  margin-bottom: 8px;
 }
 </style>
 
