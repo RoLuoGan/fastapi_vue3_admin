@@ -100,11 +100,11 @@ const NodeAPI = {
     });
   },
 
-  getRecentTasks(limit?: number) {
+  getRecentTasks(limit?: number, task_type?: string) {
     return request<ApiResponse<TaskTable[]>>({
       url: `${API_PATH}/task/recent`,
       method: "get",
-      params: { limit },
+      params: { limit, task_type },
     });
   },
 
@@ -275,6 +275,7 @@ export interface TaskTable {
 
 export interface TaskPageQuery extends PageQuery {
   task_type?: string;
+  operator_type?: string;
   task_status?: string;
   project?: string;
   idc?: string;
@@ -292,13 +293,12 @@ export interface TaskLog {
 }
 
 export interface OperatorMeta {
-  service_id: number;
-  node_ids: number[];
+  [key: string]: any; // 支持任意结构，由客户端自定义
 }
 
 export interface ExecuteTaskRequest {
-  task_type: 'node_operator';
-  operator_type: 'deploy' | 'restart';
-  operator_metas: OperatorMeta[];
+  task_type: string; // 任务类型: 'node_operator', 'server_init' 等
+  operator_type: string; // 操作类型: 'deploy', 'restart', 'init' 等
+  operator_metas: OperatorMeta[]; // 操作元数据列表（任意结构）
 }
 

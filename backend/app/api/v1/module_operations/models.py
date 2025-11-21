@@ -64,6 +64,7 @@ class NodeModel(CreatorMixin):
     project: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="运维管理项目")
     idc: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="机房")
     tags: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="服务器标签")
+    operator_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="操作类型(deploy:部署, restart:重启, init:初始化 等)")
     
     # 关联关系（多对多）
     services: Mapped[List["ServiceModel"]] = relationship(

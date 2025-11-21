@@ -1,5 +1,8 @@
 <template>
   <div class="operations-server page-root">
+    <div class="flex gap-4">
+      <!-- 左侧内容区域 -->
+      <div class="flex-1">
     <el-card shadow="never" class="search-card">
       <template #header>
         <div class="flex justify-between items-center">
@@ -52,6 +55,16 @@
               v-hasPerm="['operations:node:create']"
             >
               新增节点
+            </el-button>
+            <el-button
+              type="success"
+              plain
+              icon="setting"
+              :disabled="selectionIds.length === 0"
+              @click="handleInit(selectionIds)"
+              v-hasPerm="['operations:node:init']"
+            >
+              初始化
             </el-button>
             <el-button
               type="danger"
@@ -255,17 +268,73 @@
         </span>
       </template>
     </el-dialog>
+      </div>
+
+      <!-- 右侧任务进度栏 -->
+      <div class="w-80">
+        <el-card>
+          <template #header>
+            <div class="flex justify-between items-center">
+              <span>任务进度</span>
+              <el-button text type="primary" icon="refresh" @click="loadRecentTasks">刷新</el-button>
+            </div>
+          </template>
+          <div class="task-list">
+            <div
+              v-for="task in taskList"
+              :key="task.id"
+              class="task-item"
+              @click="handleOpenTaskDetailFromList(task.id)"
+            >
+              <div class="task-header">
+                <div>
+                  <span class="task-ip">任务 #{{ task.id }}</span>
+                </div>
+                <el-tag size="small" :type="getTaskTypeTag(task.task_type)">
+                  {{ getTaskTypeLabel(task.task_type) }}
+                </el-tag>
+              </div>
+              <div class="task-progress">
+                <el-progress
+                  :percentage="task.progress || 0"
+                  :status="progressStatus(task.task_status)"
+                  :text-inside="true"
+                  :stroke-width="14"
+                />
+              </div>
+              <div class="task-info">
+                <span class="task-time">{{ task.created_at || '-' }}</span>
+                <div class="task-status">
+                  <el-icon v-if="task.task_status === 'success'" class="status-icon success"><CircleCheck /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'partial_success'" class="status-icon partial"><WarningFilled /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'failed'" class="status-icon failed"><CircleClose /></el-icon>
+                  <el-icon v-else class="status-icon running"><Loading /></el-icon>
+                  <span class="status-text">{{ getTaskStatusText(task.task_status || 'running') }}</span>
+                </div>
+              </div>
+              <div v-if="task.error_message" class="task-error">{{ task.error_message }}</div>
+            </div>
+            <div v-if="taskList.length === 0" class="empty-tasks">
+              <el-empty :image-size="60" description="暂无任务" />
+            </div>
+          </div>
+        </el-card>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, onBeforeUnmount, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
+import { CircleCheck, CircleClose, Loading, WarningFilled } from "@element-plus/icons-vue";
 import NodeAPI, {
   type NodeForm,
   type NodePageQuery,
   type NodeTable,
   type ServiceTable,
+  type TaskTable,
 } from "@/api/operations/node";
 import DictAPI from "@/api/system/dict";
 
@@ -282,6 +351,8 @@ const dialogLoading = ref(false);
 const tableData = ref<NodeTable[]>([]);
 const total = ref(0);
 const selectionIds = ref<number[]>([]);
+const taskList = ref<TaskTable[]>([]);
+const router = useRouter();
 
 const serviceOptions = ref<ServiceOption[]>([]);
 const projectOptions = ref<any[]>([]);
@@ -484,6 +555,53 @@ function handleSubmit() {
   });
 }
 
+async function handleInit(ids: number[]) {
+  if (!ids.length) return;
+  try {
+    await ElMessageBox.confirm("确认初始化所选服务器节点吗？", "提示", {
+      type: "info",
+    });
+    
+    // 从表格数据中获取选中节点的 ip 和 port 信息
+    const selectedNodes = tableData.value.filter((node: NodeTable) => ids.includes(node.id!));
+    const nodes = selectedNodes.map((node: NodeTable) => ({
+      id: node.id,
+      ip: node.ip || '',
+      port: node.port || 22
+    }));
+    
+    // 构建初始化任务请求
+    const requestData = {
+      task_type: "server_operator",
+      operator_type: "init",
+      operator_metas: [
+        {
+          node_ids: ids,
+          nodes: nodes,  // 添加节点信息，包含 ip 和 port
+        },
+      ],
+    };
+    
+    await NodeAPI.executeTask(requestData);
+    ElMessage.success("初始化任务已启动");
+    loadData();
+    // 刷新任务列表，并启动定时刷新（如果有运行中的任务）
+    setTimeout(async () => {
+      await loadRecentTasks();
+      // 如果有正在运行的任务，启动定时刷新
+      if (hasRunningTasks() && recentTasksTimer === null) {
+        recentTasksTimer = window.setInterval(() => {
+          loadRecentTasks();
+        }, 5000);
+      }
+    }, 2000);
+  } catch (error: any) {
+    if (error !== "cancel") {
+      console.error(error);
+    }
+  }
+}
+
 async function handleDelete(ids: number[]) {
   if (!ids.length) return;
   try {
@@ -503,9 +621,95 @@ async function handleDelete(ids: number[]) {
   }
 }
 
+// 定时器ID
+let recentTasksTimer: number | null = null;
+
+/**
+ * 停止定时刷新任务列表
+ */
+function stopRecentTasksRefresh() {
+  if (recentTasksTimer !== null) {
+    clearInterval(recentTasksTimer);
+    recentTasksTimer = null;
+  }
+}
+
+/**
+ * 检查是否有正在运行的任务
+ */
+function hasRunningTasks(): boolean {
+  return taskList.value.some(task => task.task_status === "running");
+}
+
+// 加载最近任务（只显示服务器初始化任务）
+async function loadRecentTasks() {
+  try {
+    const response = await NodeAPI.getRecentTasks(20, "init"); // 只加载初始化任务
+    taskList.value = response.data.data || [];
+    
+    // 检查是否有正在运行的任务，如果没有则停止定时刷新
+    if (!hasRunningTasks()) {
+      stopRecentTasksRefresh();
+    }
+  } catch (error: any) {
+    console.error(error);
+  }
+}
+
+// 获取任务状态文本
+function getTaskStatusText(status: string) {
+  const statusMap: Record<string, string> = {
+    running: '执行中',
+    success: '完成',
+    partial_success: '部分成功',
+    failed: '失败',
+  };
+  return statusMap[status] || status;
+}
+
+function progressStatus(status?: string) {
+  if (status === 'success') return 'success';
+  if (status === 'partial_success') return 'warning';
+  if (status === 'failed') return 'exception';
+  return undefined;
+}
+
+function getTaskTypeLabel(taskType?: string) {
+  if (taskType === 'deploy') return '部署';
+  if (taskType === 'restart') return '重启';
+  if (taskType === 'init') return '初始化';
+  return taskType || '-';
+}
+
+function getTaskTypeTag(taskType?: string) {
+  if (taskType === 'deploy') return 'success';
+  if (taskType === 'restart') return 'warning';
+  if (taskType === 'init') return 'info';
+  return 'info';
+}
+
+function handleOpenTaskDetailFromList(taskId?: number) {
+  if (!taskId) return;
+  router.push({
+    path: `/operations/task/detail/${taskId}`,
+  });
+}
+
 onMounted(() => {
   loadDictOptions();
   Promise.all([loadServiceOptions(), loadData()]);
+  loadRecentTasks();
+  // 如果有正在运行的任务，启动定时刷新
+  if (hasRunningTasks()) {
+    recentTasksTimer = window.setInterval(() => {
+      loadRecentTasks();
+    }, 5000);
+  }
+});
+
+onBeforeUnmount(() => {
+  // 清除定时器，防止页面关闭后继续请求
+  stopRecentTasksRefresh();
 });
 </script>
 
@@ -522,6 +726,115 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
+}
+
+.w-80 {
+  width: 320px;
+  flex-shrink: 0;
+}
+
+.task-list {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.task-item {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: #f9fafb;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: #409eff;
+    background: #f0f9ff;
+  }
+}
+
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.task-ip {
+  font-weight: bold;
+  color: #303133;
+}
+
+.task-progress {
+  margin-bottom: 6px;
+}
+
+.task-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.task-time {
+  font-size: 12px;
+  color: #909399;
+}
+
+.task-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-icon {
+  font-size: 16px;
+  
+  &.success {
+    color: #67c23a;
+  }
+  
+  &.partial {
+    color: #e6a23c;
+  }
+  
+  &.failed {
+    color: #f56c6c;
+  }
+  
+  &.running {
+    color: #909399;
+    animation: rotate 1s linear infinite;
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-text {
+  font-size: 12px;
+  color: #606266;
+}
+
+.task-error {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: #fef0f0;
+  color: #f56c6c;
+  border-radius: 2px;
+  font-size: 12px;
+}
+
+.empty-tasks {
+  text-align: center;
+  padding: 40px 0;
 }
 </style>
 

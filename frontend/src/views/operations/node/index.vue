@@ -802,11 +802,16 @@ function hasRunningTasks(): boolean {
   return taskList.value.some(task => task.task_status === "running");
 }
 
-// 加载最近任务
+// 加载最近任务（只显示节点操作任务：部署/重启）
 async function loadRecentTasks() {
   try {
+    // 不传 task_type，后端会返回所有任务，前端可以过滤或显示全部
     const response = await NodeAPI.getRecentTasks(20);
-    taskList.value = response.data.data || [];
+    // 过滤出节点操作相关的任务（deploy、restart）
+    const allTasks = response.data.data || [];
+    taskList.value = allTasks.filter((task: TaskTable) => 
+      task.task_type === 'deploy' || task.task_type === 'restart'
+    );
     
     // 检查是否有正在运行的任务，如果没有则停止定时刷新
     if (!hasRunningTasks()) {
@@ -1011,28 +1016,44 @@ function buildOperatorMetas(nodeIds: number[]): OperatorMeta[] {
   console.log('[buildOperatorMetas] 选中的行Key列表:', Array.from(selectedRowKeys));
   
   // 遍历所有服务模块
+  const serviceMetaMap = new Map<number, { service_name: string; node_ids: number[]; nodes: any[] }>();
+  
   pageTableData.value.forEach((service: any) => {
     if (service.nodes && Array.isArray(service.nodes)) {
       // 找出属于该服务的选中节点（使用 getRowKey 匹配，避免 ID 冲突）
-      const serviceNodeIds = service.nodes
-        .filter((node: any) => {
-          const nodeKey = getRowKey(node);
-          return selectedRowKeys.has(nodeKey);
-        })
-        .map((node: any) => node.id);
+      const selectedNodes = service.nodes.filter((node: any) => {
+        const nodeKey = getRowKey(node);
+        return selectedRowKeys.has(nodeKey);
+      });
+      
+      const serviceNodeIds = selectedNodes.map((node: any) => node.id);
       
       if (serviceNodeIds.length > 0) {
-        metaMap.set(service.id, serviceNodeIds);
+        serviceMetaMap.set(service.id, {
+          service_name: service.name || '',
+          node_ids: serviceNodeIds,
+          nodes: selectedNodes
+        });
         console.log(`[buildOperatorMetas] 服务 ${service.name} (ID: ${service.id}) 包含 ${serviceNodeIds.length} 个选中节点: [${serviceNodeIds.join(', ')}]`);
       }
     }
   });
   
-  // 转换为数组格式
-  const result = Array.from(metaMap.entries()).map(([service_id, node_ids]) => ({
-    service_id,
-    node_ids
-  }));
+  // 转换为数组格式，包含 service_name 和每个节点的 ip
+  const result = Array.from(serviceMetaMap.entries()).map(([service_id, meta]) => {
+    // 构建节点信息列表，包含 ip
+    const nodes = meta.nodes.map((node: any) => ({
+      id: node.id,
+      ip: node.ip || ''
+    }));
+    
+    return {
+      service_id,
+      service_name: meta.service_name,
+      node_ids: meta.node_ids,
+      nodes: nodes  // 添加节点信息，包含 ip
+    };
+  });
   
   console.log('[buildOperatorMetas] 最终生成的操作元数据:', result);
   return result;

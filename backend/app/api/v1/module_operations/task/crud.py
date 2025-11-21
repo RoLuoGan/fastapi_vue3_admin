@@ -26,10 +26,18 @@ class TaskCRUD(CRUDBase[TaskModel, Dict, Dict]):
     async def get_recent_tasks_crud(
         self,
         limit: int = 20,
+        task_type: Optional[str] = None,
         preload: Optional[List[Union[str, Any]]] = None,
     ) -> Sequence[TaskModel]:
         try:
-            sql = select(self.model).order_by(self.model.created_at.desc()).limit(limit)
+            sql = select(self.model).order_by(self.model.created_at.desc())
+            
+            # 如果指定了任务类型，添加过滤条件
+            if task_type:
+                sql = sql.where(self.model.task_type == task_type)
+            
+            sql = sql.limit(limit)
+            
             for opt in self._CRUDBase__loader_options(preload):
                 sql = sql.options(opt)
             sql = await self._CRUDBase__filter_permissions(sql)
@@ -51,14 +59,51 @@ class TaskCRUD(CRUDBase[TaskModel, Dict, Dict]):
         out_schema = TaskOutSchema,
         preload: Optional[List[Union[str, Any]]] = None,
     ) -> Dict:
-        return await self.page(
+        # 处理 task_type 和 operator_type 的过滤（从 params JSON 字段中提取）
+        search_dict = search.copy()
+        task_type_filter = search_dict.pop("task_type", None)
+        operator_type_filter = search_dict.pop("operator_type", None)
+        
+        # 构建基础查询
+        result = await self.page(
             offset=offset,
             limit=limit,
             order_by=order_by,
-            search=search,
+            search=search_dict,
             out_schema=out_schema,
             preload=preload,
         )
+        
+        # 如果指定了 task_type 或 operator_type，需要从 params JSON 中过滤
+        if task_type_filter or operator_type_filter:
+            import json
+            filtered_items = []
+            for item in result.get("items", []):
+                # 解析 params JSON
+                params = item.params if isinstance(item.params, dict) else {}
+                if isinstance(item.params, str):
+                    try:
+                        params = json.loads(item.params)
+                    except:
+                        params = {}
+                
+                # 检查 task_type 过滤
+                if task_type_filter:
+                    if params.get("task_type") != task_type_filter:
+                        continue
+                
+                # 检查 operator_type 过滤
+                if operator_type_filter:
+                    if params.get("operator_type") != operator_type_filter:
+                        continue
+                
+                filtered_items.append(item)
+            
+            # 更新结果
+            result["items"] = filtered_items
+            result["total"] = len(filtered_items)
+        
+        return result
 
     async def delete_crud(self, ids: List[int]) -> None:
         await self.delete(ids=ids)

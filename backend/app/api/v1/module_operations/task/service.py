@@ -29,36 +29,26 @@ class TaskService:
     """任务管理服务层 - 只负责业务拼装和调度"""
 
     @classmethod
-    def _build_task_params(cls, auth: AuthSchema, validated_metas: List[Dict], task_type: str) -> Dict[str, Any]:
+    def _build_task_params(cls, auth: AuthSchema, validated_metas: List[Dict], task_type: str, operator_type: str) -> Dict[str, Any]:
         """
-        构建任务参数 - 新格式
+        构建任务参数 - 直接透传，不做加工
         
         参数:
         - auth: 认证信息
-        - validated_metas: 验证后的操作元数据列表 [{"service_id": 1, "nodes": [node_obj, ...]}, ...]
-        - task_type: 任务类型 (deploy 或 restart)
+        - validated_metas: 操作元数据列表（任意结构，直接透传）
+        - task_type: 任务类型 (node_operator, server_operator 等)
+        - operator_type: 操作类型 (deploy, restart, init 等)
         
         返回:
-        - Dict: 任务参数字典，格式:
-          {
-            "task_type": "node_operator",
-            "operator_type": "deploy",
-            "operator_metas": [
-              {"service_id": 1, "node_ids": [1, 2]},
-              {"service_id": 2, "node_ids": [3, 4]}
-            ]
-          }
+        - Dict: 任务参数字典，直接使用原始 operator_metas
         """
+        # 直接透传，不做任何加工
+        logger.info(f"构建任务参数 - 任务类型: {task_type}, 操作类型: {operator_type}, 操作元数据: {validated_metas}")
+    
         return {
-            "task_type": "node_operator",
-            "operator_type": task_type,  # deploy 或 restart
-            "operator_metas": [
-                {
-                    "service_id": meta["service_id"],
-                    "node_ids": [node.id for node in meta["nodes"]],
-                }
-                for meta in validated_metas
-            ],
+            "task_type": task_type,
+            "operator_type": operator_type,
+            "operator_metas": validated_metas,
         }
 
     @classmethod
@@ -68,6 +58,7 @@ class TaskService:
         nodes: List[Any],
         validated_metas: List[Dict],
         task_type: str,
+        operator_type: str,
     ) -> Dict[str, Any]:
         """
         创建单个批次任务记录（包含多个节点）
@@ -76,21 +67,27 @@ class TaskService:
         参数:
         - auth: 认证信息
         - nodes: 所有节点列表
-        - validated_metas: 验证后的操作元数据列表 [{"service_id": 1, "nodes": [node_obj, ...]}, ...]
-        - task_type: 任务类型 (deploy 或 restart)
+        - validated_metas: 操作元数据列表（任意结构，直接透传）
+        - task_type: 任务类型 (node_operator, server_operator 等)
+        - operator_type: 操作类型 (deploy, restart, init 等)
         """
         task_crud = TaskCRUD(auth)
         
         # 使用时间戳作为日志文件名标识
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        log_path = TaskExecutor.build_log_path(task_type=task_type, node_ip=f"batch_{timestamp}")
+        log_path = TaskExecutor.build_log_path(task_type=operator_type, node_ip=f"batch_{timestamp}")
         
-        # 构建新格式的任务参数
-        params_dict = cls._build_task_params(auth=auth, validated_metas=validated_metas, task_type=task_type)
+        # 构建任务参数（直接透传，不做加工）
+        params_dict = cls._build_task_params(
+            auth=auth, 
+            validated_metas=validated_metas, 
+            task_type=task_type,
+            operator_type=operator_type
+        )
         
         # 准备任务数据
         task_data = {
-            "task_type": task_type,
+            "task_type": operator_type,  # 使用 operator_type 作为 task_type 存储
             "task_status": "running",
             "progress": 0,
             "log_path": str(log_path),
@@ -105,8 +102,8 @@ class TaskService:
         return {"task": task, "log_path": log_path, "nodes": nodes}
 
     @classmethod
-    async def get_recent_tasks_service(cls, auth: AuthSchema, limit: int = 20) -> List[Dict]:
-        tasks = await TaskCRUD(auth).get_recent_tasks_crud(limit=limit)
+    async def get_recent_tasks_service(cls, auth: AuthSchema, limit: int = 20, task_type: Optional[str] = None) -> List[Dict]:
+        tasks = await TaskCRUD(auth).get_recent_tasks_crud(limit=limit, task_type=task_type)
         return [TaskOutSchema.model_validate(task).model_dump() for task in tasks]
 
     @classmethod
@@ -187,98 +184,72 @@ class TaskService:
     async def execute_task_service(
         cls,
         auth: AuthSchema,
-        operator_metas: List[Any],
         task_type: str,
+        operator_type: str,
+        operator_metas: List[Dict[str, Any]],
         redis: Optional[Redis] = None,
     ) -> Dict:
         """
-        执行任务 - 统一的任务执行入口
+        执行任务 - 统一的任务执行入口（不做参数加工，只做透传）
         
         参数:
         - auth: 认证信息
-        - operator_metas: 操作元数据列表 [{"service_id": 1, "node_ids": [1, 2]}, ...]
-        - task_type: 任务类型 (deploy 或 restart)
+        - task_type: 任务类型 (node_operator, server_operator 等)
+        - operator_type: 操作类型 (deploy, restart, init 等)
+        - operator_metas: 操作元数据列表（任意结构，由客户端自定义，不做加工直接透传）
+        - redis: Redis 连接（可选）
         
         返回:
         - Dict: 包含任务信息的字典
         """
         if not operator_metas:
-            task_name = "部署" if task_type == "deploy" else "重启"
-            raise CustomException(msg=f"请选择需要{task_name}的节点")
-        
-        if task_type not in ("deploy", "restart"):
-            raise CustomException(msg="任务类型只能是 deploy 或 restart")
+            raise CustomException(msg="操作元数据不能为空")
 
-        # 根据 operator_metas 获取节点信息并验证
+        # 获取节点信息（用于创建任务记录，但不做业务逻辑验证）
         nodes = []
-        validated_metas = []  # 验证后的元数据（包含节点对象）
-        
         for meta in operator_metas:
-            service_id = meta.service_id
-            node_ids = meta.node_ids
-            
-            service_nodes = []  # 该服务下的节点列表
+            # 尝试从 operator_metas 中提取 node_ids
+            node_ids = meta.get("node_ids", [])
+            if not node_ids:
+                continue
             
             for node_id in node_ids:
-                # 查询节点
                 node = await ServerCRUD(auth).get_by_id_crud(id=node_id, preload=["service", "services"])
-                if not node:
-                    logger.warning(f"节点ID {node_id} 不存在，跳过")
-                    continue
-                
-                # 验证节点是否属于该服务（检查多对多关系）
-                service_ids_for_node = [s.id for s in (node.services or [])]
-                if service_id not in service_ids_for_node:
-                    # 如果不在多对多关系中，检查是否是主服务
-                    if node.service_id != service_id:
-                        logger.warning(f"节点 {node_id} 不属于服务 {service_id}，跳过")
-                        continue
-                
-                nodes.append(node)
-                service_nodes.append(node)
-            
-            if service_nodes:
-                validated_metas.append({
-                    "service_id": service_id,
-                    "nodes": service_nodes,
-                })
+                if node:
+                    nodes.append(node)
 
-        if not nodes:
-            task_name = "部署" if task_type == "deploy" else "重启"
-            raise CustomException(msg=f"没有找到有效的节点进行{task_name}")
-
-        # 创建单个批次任务（包含所有节点）
+        # 创建任务记录（直接透传所有参数）
         task_record = await cls._create_task(
             auth=auth,
-            nodes=nodes,
-            validated_metas=validated_metas,
-            task_type=task_type
+            nodes=nodes if nodes else [],
+            validated_metas=operator_metas,  # 直接使用原始 operator_metas
+            task_type=task_type,  # 传递真实的 task_type
+            operator_type=operator_type  # 传递 operator_type
         )
 
         task = task_record["task"]
         log_path = Path(task_record["log_path"])
 
-        # 使用 TaskExecutor 执行批次任务，传递 operator_metas
+        # 使用 TaskExecutor 执行批次任务，直接透传所有参数
         asyncio.create_task(
             TaskExecutor.execute_batch_task(
                 base_auth=auth,
                 task_id=task.id,
                 log_path=log_path,
-                nodes=nodes,
+                nodes=nodes if nodes else [],
                 task_type=task_type,
-                operator_metas=validated_metas,  # 传递验证后的 operator_metas
+                operator_type=operator_type,
+                operator_metas=operator_metas,  # 直接透传，不做加工
                 redis=redis,
             )
         )
-
-        task_name = "部署" if task_type == "deploy" else "重启"
         
         return {
-            "message": f"{task_name}任务已启动",
+            "message": "任务已启动",
             "task_id": task.id,
             "node_count": len(nodes),
-            "service_count": len(validated_metas),
             "task_type": task_type,
+            "operator_type": operator_type,
         }
 
     @classmethod

@@ -20,6 +20,7 @@ class ServerCreateSchema(BaseModel):
     project: Optional[str] = Field(default=None, max_length=50, description="运维管理项目")
     idc: Optional[str] = Field(default=None, max_length=50, description="机房")
     tags: Optional[str] = Field(default=None, max_length=100, description="服务器标签")
+    operator_type: Optional[str] = Field(default=None, max_length=50, description="操作类型(deploy:部署, restart:重启, init:初始化 等)")
     service_ids: Optional[List[int]] = Field(default=None, description="关联的服务模块ID列表（仅用于更新关联关系）")
 
     @field_validator("ip")
@@ -69,6 +70,7 @@ class ServerOutSchema(ServerCreateSchema, BaseSchema):
                 "project",
                 "idc",
                 "tags",
+                "operator_type",
                 "created_at",
                 "updated_at",
             ]

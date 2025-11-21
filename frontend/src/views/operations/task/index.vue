@@ -18,8 +18,15 @@
       <el-form ref="queryFormRef" :model="queryFormData" inline label-width="90px" label-suffix=":">
         <el-form-item label="任务类型">
           <el-select v-model="queryFormData.task_type" placeholder="全部" clearable>
+            <el-option label="节点操作" value="node_operator" />
+            <el-option label="服务器操作" value="server_operator" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="操作类型">
+          <el-select v-model="queryFormData.operator_type" placeholder="全部" clearable>
             <el-option label="部署" value="deploy" />
             <el-option label="重启" value="restart" />
+            <el-option label="初始化" value="init" />
           </el-select>
         </el-form-item>
         <el-form-item label="任务状态">
@@ -88,10 +95,17 @@
       >
         <el-table-column type="selection" width="55" align="center" />
         <el-table-column prop="id" label="任务ID" width="90" />
-        <el-table-column prop="task_type" label="任务类型" width="110">
+        <el-table-column prop="task_type" label="任务类型" width="130">
           <template #default="{ row }">
-            <el-tag :type="taskTypeTag(row.task_type)">
-              {{ taskTypeLabel(row.task_type) }}
+            <el-tag :type="getTaskTypeCategoryTag(row.params?.task_type)">
+              {{ getTaskTypeCategoryLabel(row.params?.task_type) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="operator_type" label="操作类型" width="110">
+          <template #default="{ row }">
+            <el-tag :type="taskTypeTag(row.params?.operator_type || row.task_type)">
+              {{ taskTypeLabel(row.params?.operator_type || row.task_type) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -184,6 +198,7 @@ const queryFormData = reactive<TaskPageQuery>({
   page_no: 1,
   page_size: 10,
   task_type: undefined,
+  operator_type: undefined,
   task_status: undefined,
   project: undefined,
   idc: undefined,
@@ -245,6 +260,8 @@ function handleReset() {
   createdRange.value = [];
   queryFormData.page_no = 1;
   queryFormData.page_size = 10;
+  queryFormData.task_type = undefined;
+  queryFormData.operator_type = undefined;
   queryFormData.start_time = undefined;
   queryFormData.end_time = undefined;
   loadData();
@@ -268,12 +285,26 @@ function handleSelectionChange(selection: TaskTable[]) {
 function taskTypeLabel(type?: string) {
   if (type === "deploy") return "部署";
   if (type === "restart") return "重启";
+  if (type === "init") return "初始化";
   return type || "-";
 }
 
 function taskTypeTag(type?: string) {
   if (type === "deploy") return "success";
   if (type === "restart") return "warning";
+  if (type === "init") return "info";
+  return "info";
+}
+
+function getTaskTypeCategoryLabel(taskType?: string) {
+  if (taskType === "node_operator") return "节点操作";
+  if (taskType === "server_operator") return "服务器操作";
+  return taskType || "-";
+}
+
+function getTaskTypeCategoryTag(taskType?: string) {
+  if (taskType === "node_operator") return "primary";
+  if (taskType === "server_operator") return "success";
   return "info";
 }
 

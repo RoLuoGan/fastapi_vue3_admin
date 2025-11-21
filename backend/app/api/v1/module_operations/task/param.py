@@ -14,7 +14,8 @@ class TaskQueryParam:
 
     def __init__(
         self,
-        task_type: Optional[str] = Query(None, description="任务类型"),
+        task_type: Optional[str] = Query(None, description="任务类型（node_operator、server_operator 等）"),
+        operator_type: Optional[str] = Query(None, description="操作类型（deploy、restart、init 等）"),
         task_status: Optional[str] = Query(None, description="任务状态"),
         project: Optional[str] = Query(None, description="运维管理项目"),
         idc: Optional[str] = Query(None, description="机房"),
@@ -24,6 +25,7 @@ class TaskQueryParam:
     ) -> None:
 
         self.task_type = task_type
+        self.operator_type = operator_type
         self.task_status = task_status
         self.project = project
         self.idc = idc

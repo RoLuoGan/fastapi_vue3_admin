@@ -3,7 +3,8 @@
 任务路由
 """
 
-from fastapi import APIRouter, Depends, Body, Path, Request
+from typing import Optional
+from fastapi import APIRouter, Depends, Body, Path, Request, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from redis.asyncio.client import Redis
 
@@ -23,33 +24,40 @@ from .service import TaskService
 router = APIRouter(route_class=OperationLogRoute, prefix="/node", tags=["任务管理"])
 
 
-@router.post("/execute", summary="执行任务", description="统一的任务执行接口（部署/重启）- 支持多模块多节点")
+@router.post("/execute", summary="执行任务", description="统一的任务执行接口（支持多种任务类型）- 支持多模块多节点")
 async def execute_task_controller(
     data: ExecuteTaskSchema,
     redis: Redis = Depends(redis_getter),
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:deploy", "operations:node:restart"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:node:deploy", "operations:node:restart", "operations:node:init"])),
 ) -> JSONResponse:
-    logger.info(f"收到任务请求 - 操作类型: {data.operator_type}, 模块数: {len(data.operator_metas)}")
+    logger.info(f"收到任务请求 - 任务类型: {data.task_type}, 操作类型: {data.operator_type}, 元数据数: {len(data.operator_metas)}")
     
-    # 直接传递完整的 operator_metas 到 Service 层
+    # 转换 operator_metas 为字典列表（如果已经是字典则直接使用）
+    operator_metas_list = [
+        meta if isinstance(meta, dict) else meta.model_dump() 
+        for meta in data.operator_metas
+    ]
+    
+    # 传递到 Service 层
     result = await TaskService.execute_task_service(
-        operator_metas=data.operator_metas,
-        task_type=data.operator_type,
+        task_type=data.task_type,
+        operator_type=data.operator_type,
+        operator_metas=operator_metas_list,
         auth=auth,
         redis=redis,
     )
     
-    task_name = "部署" if data.operator_type == "deploy" else "重启"
-    logger.info(f"{task_name}任务已启动: task_id={result.get('task_id')}, 节点数={result.get('node_count')}")
-    return SuccessResponse(data=result, msg=f"{task_name}任务已启动")
+    logger.info(f"任务已启动: task_id={result.get('task_id')}, 节点数={result.get('node_count')}")
+    return SuccessResponse(data=result, msg=result.get("message", "任务已启动"))
 
 
-@router.get("/task/recent", summary="查询最近任务", description="查询最近20个任务")
+@router.get("/task/recent", summary="查询最近任务", description="查询最近任务，支持按任务类型过滤")
 async def get_recent_tasks_controller(
-    limit: int = 20,
+    limit: int = Query(20, description="返回数量"),
+    task_type: Optional[str] = Query(None, description="任务类型过滤（如：deploy、restart、init）"),
     auth: AuthSchema = Depends(AuthPermission(["operations:node:query"])),
 ) -> JSONResponse:
-    result = await TaskService.get_recent_tasks_service(limit=limit, auth=auth)
+    result = await TaskService.get_recent_tasks_service(limit=limit, task_type=task_type, auth=auth)
     logger.info("查询最近任务成功")
     return SuccessResponse(data=result, msg="查询最近任务成功")
 

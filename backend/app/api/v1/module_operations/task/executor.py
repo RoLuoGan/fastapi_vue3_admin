@@ -179,6 +179,7 @@ class TaskExecutor:
         log_path: Path,
         nodes: List[Any],
         task_type: str,
+        operator_type: str,
         operator_metas: Optional[List[dict]] = None,
         redis: Optional[Redis] = None,
     ) -> None:
@@ -190,8 +191,9 @@ class TaskExecutor:
             task_id: 任务ID
             log_path: 日志文件路径
             nodes: 节点列表
-            task_type: 任务类型 (deploy/restart)
-            operator_metas: 操作元数据（可选），格式: [{"service_id": 1, "nodes": [node_obj, ...]}, ...]
+            task_type: 任务类型 (node_operator, server_operator 等)
+            operator_type: 操作类型 (deploy, restart, init 等)
+            operator_metas: 操作元数据（任意结构，直接透传）
             redis: 复用的 Redis 连接（可选，通过依赖注入获取）
         """
         async with AsyncSessionLocal() as new_db:
@@ -249,54 +251,22 @@ class TaskExecutor:
                         log_buffer.clear()
             
             try:
-                # 构建脚本参数（脚本位于 env 同级的 scripts 目录）
-                script_path = settings.BASE_DIR.joinpath("scripts", "execute_batch_task.py")
-                if not script_path.exists():
-                    raise FileNotFoundError(f"脚本文件不存在: {script_path}")
+                # 直接使用 operator_metas，不做加工（只转换为可序列化格式）
+                script_operator_metas = operator_metas or []
                 
-                # 构建 operator_metas（如果提供）
-                script_operator_metas = None
-                if operator_metas:
-                    script_operator_metas = cls._build_operator_metas_for_script(operator_metas)
-                else:
-                    # 如果没有提供 operator_metas，从 nodes 构建
-                    # 按 service_id 分组
-                    nodes_by_service = {}
-                    for node in nodes:
-                        service_id = node.service_id or 0
-                        if service_id not in nodes_by_service:
-                            nodes_by_service[service_id] = []
-                        nodes_by_service[service_id].append(node)
-                    
-                    script_operator_metas = []
-                    for service_id, service_nodes in nodes_by_service.items():
-                        service_name = None
-                        if service_nodes:
-                            first_node = service_nodes[0]
-                            if hasattr(first_node, 'service') and first_node.service:
-                                service_name = first_node.service.name
-                        
-                        node_list = []
-                        for node in service_nodes:
-                            node_list.append({
-                                "id": node.id,
-                                "ip": node.ip,
-                                "port": node.port or 22,
-                                "service_id": service_id,
-                            })
-                        
-                        script_operator_metas.append({
-                            "service_id": service_id,
-                            "service_name": service_name,
-                            "nodes": node_list,
-                        })
-                
-                logger.info(f"导入批次任务脚本模块: {script_path}")
+                # 根据 task_type 确定脚本模块名
+                # 脚本命名规则: task_{task_type}.py
+                script_module_name = f"scripts.task_{task_type}"
+                logger.info(f"导入批次任务脚本模块: {script_module_name}")
                 
                 # 通过 import_module 导入脚本模块
                 if str(settings.BASE_DIR) not in sys.path:
                     sys.path.append(str(settings.BASE_DIR))
-                module = import_module("scripts.execute_batch_task")
+                try:
+                    module = import_module(script_module_name)
+                except ModuleNotFoundError:
+                    logger.warning(f"未找到任务类型脚本: {script_module_name}，使用默认脚本 execute_batch_task")
+                    module = import_module("scripts.execute_batch_task")
                 
                 loop = asyncio.get_running_loop()
                 log_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -380,7 +350,7 @@ class TaskExecutor:
                     return module.execute_in_process(
                         log_path=log_path,
                         task_id=task_id,
-                        task_type=task_type,
+                        task_type=operator_type,  # 传递 operator_type 给脚本
                         operator_metas=script_operator_metas,
                         log_handler=log_handler,
                         progress_handler=progress_handler,
