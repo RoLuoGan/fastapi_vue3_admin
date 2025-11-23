@@ -205,22 +205,6 @@ class TaskService:
         if not operator_metas:
             raise CustomException(msg="操作元数据不能为空")
 
-        # 部署任务参数填充
-        if operator_type == 'deploy':
-            from app.api.v1.module_operations.service_package.crud import ServicePackageCRUD
-            pkg_crud = ServicePackageCRUD(auth)
-            for meta in operator_metas:
-                service_id = meta.get("service_id")
-                version = meta.get("version")
-                
-                if service_id and version:
-                    pkg = await pkg_crud.get_by_service_and_version(service_id, version)
-                    if pkg:
-                        meta["package_path"] = pkg.package_path
-                        meta["md5"] = pkg.md5
-                    else:
-                        raise CustomException(msg=f"服务 {service_id} 的版本包 {version} 不存在")
-
         # 获取节点信息（用于创建任务记录，但不做业务逻辑验证）
         nodes = []
         for meta in operator_metas:

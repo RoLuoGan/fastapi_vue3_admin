@@ -160,5 +160,41 @@
     "status": true,
     "description": "Prometheus HTTP SD 接口访问密钥，用于 Prometheus 自动发现配置",
     "creator_id": 1
+  },
+  {
+    "config_name": "阿里云OSS AccessKeyId",
+    "config_key": "sys_oss_access_key_id",
+    "config_value": "",
+    "config_type": false,
+    "status": true,
+    "description": "阿里云OSS AccessKeyId",
+    "creator_id": 1
+  },
+  {
+    "config_name": "阿里云OSS AccessKeySecret",
+    "config_key": "sys_oss_access_key_secret",
+    "config_value": "",
+    "config_type": false,
+    "status": true,
+    "description": "阿里云OSS AccessKeySecret",
+    "creator_id": 1
+  },
+  {
+    "config_name": "阿里云OSS Endpoint",
+    "config_key": "sys_oss_endpoint",
+    "config_value": "",
+    "config_type": false,
+    "status": true,
+    "description": "阿里云OSS Endpoint",
+    "creator_id": 1
+  },
+  {
+    "config_name": "阿里云OSS BucketName",
+    "config_key": "sys_oss_bucket_name",
+    "config_value": "",
+    "config_type": false,
+    "status": true,
+    "description": "阿里云OSS BucketName",
+    "creator_id": 1
   }
 ]

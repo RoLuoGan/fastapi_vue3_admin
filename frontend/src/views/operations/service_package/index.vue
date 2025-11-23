@@ -5,7 +5,7 @@
       <el-form :inline="true" :model="queryParams" @submit.prevent="handleQuery">
         <el-form-item label="服务模块">
           <el-select v-model="queryParams.service_id" placeholder="请选择服务模块" clearable filterable>
-            <el-option v-for="item in serviceOptions" :key="item.id" :label="item.name" :value="item.id" />
+            <el-option v-for="item in serviceOptions" :key="item.id || 0" :label="item.name" :value="item.id || 0" />
           </el-select>
         </el-form-item>
         <el-form-item>
@@ -48,7 +48,7 @@
        <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
           <el-form-item label="服务模块" prop="service_id">
             <el-select v-model="form.service_id" placeholder="请选择" :disabled="dialog.type === 'edit'" filterable style="width: 100%">
-                <el-option v-for="item in serviceOptions" :key="item.id" :label="item.name" :value="item.id" />
+                <el-option v-for="item in serviceOptions" :key="item.id || 0" :label="item.name" :value="item.id || 0" />
             </el-select>
           </el-form-item>
           <el-form-item label="版本号" prop="version">
@@ -85,7 +85,7 @@
         <el-form :model="oneClickForm" label-width="100px">
              <el-form-item label="服务模块">
                 <el-select v-model="oneClickForm.service_id" filterable style="width: 100%">
-                    <el-option v-for="item in serviceOptions" :key="item.id" :label="item.name" :value="item.id" />
+                    <el-option v-for="item in serviceOptions" :key="item.id || 0" :label="item.name" :value="item.id || 0" />
                 </el-select>
              </el-form-item>
              <el-form-item label="日期">

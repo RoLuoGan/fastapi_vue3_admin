@@ -1137,11 +1137,21 @@ async function confirmDeploy() {
     
     loading.value = true;
     try {
-        const operatorMetas = deployDialog.data.map(row => ({
-            service_id: row.service_id,
-            node_ids: row.node_ids,
-            version: row.version
-        }));
+        const operatorMetas = [];
+        for (const row of deployDialog.data) {
+            if (row.version) {
+                const found = row.versions.find((v: any) => v.version === row.version);
+                if (found) {
+                    operatorMetas.push({
+                        service_id: row.service_id,
+                        node_ids: row.node_ids,
+                        version: row.version,
+                        package_path: found.package_path,
+                        md5: found.md5
+                    });
+                }
+            }
+        }
         
         const requestData: any = {
             task_type: 'node_operator',
