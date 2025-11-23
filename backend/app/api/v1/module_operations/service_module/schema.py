@@ -56,6 +56,7 @@ class ServiceOutSchema(ServiceCreateSchema, BaseSchema):
     """服务模块响应模型"""
     model_config = {"from_attributes": True}
 
+    current_package_version: Optional[str] = Field(default=None, description="当前软件包版本号")
     nodes: Optional[List["ServerOutSchema"]] = Field(default=None, description="节点列表")
 
 

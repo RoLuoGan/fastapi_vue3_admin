@@ -81,6 +81,12 @@
         <el-table-column prop="module_group" label="模块分组" min-width="120" />
         <el-table-column prop="name" label="服务名称" min-width="160" />
         <el-table-column prop="code" label="服务编码" min-width="140" />
+        <el-table-column prop="current_package_version" label="当前版本号" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">
+             <el-tag v-if="row.current_package_version" type="info" size="small">{{ row.current_package_version }}</el-tag>
+             <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status ? 'success' : 'danger'">

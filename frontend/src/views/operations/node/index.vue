@@ -184,6 +184,30 @@
       </div>
     </div>
 
+    <!-- 部署确认弹窗 -->
+    <el-dialog v-model="deployDialog.visible" title="部署确认" width="700px" append-to-body>
+      <el-table :data="deployDialog.data" border stripe>
+        <el-table-column prop="service_name" label="部署模块" />
+        <el-table-column label="当前版本号">
+           <template #default="{ row }">
+              <el-select v-model="row.version" placeholder="请选择版本" :loading="row.loading" @visible-change="(val) => handleVersionVisibleChange(val, row)">
+                 <el-option v-for="ver in row.versions" :key="ver.id" :label="ver.version" :value="ver.version" />
+              </el-select>
+           </template>
+        </el-table-column>
+        <el-table-column prop="node_count" label="部署节点数" />
+      </el-table>
+      <div class="mt-4 flex justify-end gap-8 text-sm">
+         <span>汇总:</span>
+         <span>部署总模块数: {{ deployDialog.data.length }}</span>
+         <span>部署总节点数: {{ deployTotalNodes }}</span>
+      </div>
+      <template #footer>
+        <el-button @click="deployDialog.visible = false">取消</el-button>
+        <el-button type="primary" @click="confirmDeploy" :loading="loading">确定部署</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 服务模块弹窗 -->
     <el-dialog v-model="serviceDialogVisible.visible" :title="serviceDialogVisible.title" @close="handleCloseServiceDialog">
       <template v-if="serviceDialogVisible.type === 'detail'">
@@ -321,6 +345,7 @@ defineOptions({
 });
 
 import NodeAPI, { ServiceTable, NodeTable, TaskTable, ServiceForm, NodeForm, ServiceQueryParam } from "@/api/operations/node";
+import ServicePackageAPI from "@/api/operations/service_package";
 import { useRouter } from "vue-router";
 import { QuestionFilled, CircleCheck, CircleClose, Loading, WarningFilled, ArrowDown, ArrowUp } from "@element-plus/icons-vue";
 import DictAPI from "@/api/system/dict";
@@ -388,6 +413,15 @@ const nodeDialogVisible = reactive({
   title: "",
   visible: false,
   type: 'create' as 'create' | 'update' | 'detail',
+});
+
+// 部署确认弹窗状态
+const deployDialog = reactive({
+  visible: false,
+  data: [] as any[]
+});
+const deployTotalNodes = computed(() => {
+    return deployDialog.data.reduce((sum, item) => sum + (item.node_count || 0), 0);
 });
 
 // 详情表单
@@ -1059,6 +1093,82 @@ function buildOperatorMetas(nodeIds: number[]): OperatorMeta[] {
   return result;
 }
 
+// 加载版本列表
+async function loadVersions(row: any) {
+    row.loading = true;
+    try {
+        const res = await ServicePackageAPI.getList({ service_id: row.service_id });
+        row.versions = res.data.data || [];
+        // 如果没有选版本且有版本，默认选中第一个（最新的）
+        if (!row.version && row.versions.length > 0) {
+            // 优先选当前版本
+            if (row.current_version) {
+                const found = row.versions.find((v: any) => v.version === row.current_version);
+                if (found) {
+                    row.version = found.version;
+                } else {
+                    row.version = row.versions[0].version;
+                }
+            } else {
+                row.version = row.versions[0].version;
+            }
+        }
+    } catch(e) {
+        console.error(e);
+    } finally {
+        row.loading = false;
+    }
+}
+
+function handleVersionVisibleChange(visible: boolean, row: any) {
+    if (visible && (!row.versions || row.versions.length === 0)) {
+        loadVersions(row);
+    }
+}
+
+async function confirmDeploy() {
+    // Validate
+    for (const row of deployDialog.data) {
+        if (!row.version) {
+            ElMessage.warning(`请为 ${row.service_name} 选择版本`);
+            return;
+        }
+    }
+    
+    loading.value = true;
+    try {
+        const operatorMetas = deployDialog.data.map(row => ({
+            service_id: row.service_id,
+            node_ids: row.node_ids,
+            version: row.version
+        }));
+        
+        const requestData: any = {
+            task_type: 'node_operator',
+            operator_type: 'deploy',
+            operator_metas: operatorMetas
+        };
+        
+        await NodeAPI.deploy(requestData);
+        ElMessage.success('部署任务已提交');
+        deployDialog.visible = false;
+        handleRefresh();
+        
+        setTimeout(async () => {
+            await loadRecentTasks();
+            if (hasRunningTasks() && recentTasksTimer === null) {
+              recentTasksTimer = window.setInterval(() => {
+                loadRecentTasks();
+              }, 5000);
+            }
+        }, 2000);
+    } catch(e) {
+        console.error(e);
+    } finally {
+        loading.value = false;
+    }
+}
+
 // 部署
 async function handleDeploy() {
   if (selectNodeIds.value.length === 0) {
@@ -1066,75 +1176,25 @@ async function handleDeploy() {
     return;
   }
   
-  console.log('========== 部署操作请求 ==========');
-  console.log('[部署] 选中的节点ID列表:', selectNodeIds.value);
-  console.log('[部署] 选中的节点数量:', selectNodeIds.value.length);
-  
-  // 打印选中节点的详细信息
-  const selectedNodes: any[] = [];
-  pageTableData.value.forEach((service: any) => {
-    if (service.nodes && Array.isArray(service.nodes)) {
-      service.nodes.forEach((node: any) => {
-        if (selectNodeIds.value.includes(node.id)) {
-          selectedNodes.push({
-            node_id: node.id,
-            node_ip: node.ip,
-            node_port: node.port,
-            service_id: service.id,
-            service_name: service.name,
-            composite_id: node.composite_id
-          });
-        }
-      });
-    }
-  });
-  console.log('[部署] 选中的节点详情:', selectedNodes);
-  
-  // 构建操作元数据
   const operatorMetas = buildOperatorMetas(selectNodeIds.value);
-  console.log('[部署] 操作元数据 (按服务分组):', operatorMetas);
-  operatorMetas.forEach((meta, idx) => {
-    console.log(`  模块 ${idx + 1}: 服务ID=${meta.service_id}, 节点ID列表=[${meta.node_ids.join(', ')}], 节点数量=${meta.node_ids.length}`);
+  
+  deployDialog.data = operatorMetas.map((meta: any) => {
+      const service = pageTableData.value.find((s: any) => s.id === meta.service_id);
+      return {
+          service_id: meta.service_id,
+          service_name: meta.service_name,
+          node_count: meta.node_ids.length,
+          current_version: service?.current_package_version,
+          version: service?.current_package_version || '',
+          versions: [],
+          loading: false,
+          node_ids: meta.node_ids
+      };
   });
   
-  ElMessageBox.confirm("确认部署选中的节点?", "提示", {
-    confirmButtonText: "确定",
-    cancelButtonText: "取消",
-    type: "info",
-  }).then(async () => {
-    try {
-      loading.value = true;
-      // 使用新的数据格式调用 API
-      const requestData: any = {
-        task_type: 'node_operator',
-        operator_type: 'deploy',
-        operator_metas: operatorMetas
-      };
-      console.log('[部署] 准备发送的请求数据 (JSON格式):');
-      console.log(JSON.stringify(requestData, null, 2));
-      console.log('==========================================');
-      await NodeAPI.deploy(requestData);
-      console.log('[部署] 请求发送成功');
-      // 响应拦截器已经自动显示成功消息，这里不需要重复显示
-      handleRefresh();
-      // 刷新任务列表，并启动定时刷新（如果有运行中的任务）
-      setTimeout(async () => {
-        await loadRecentTasks();
-        // 如果有正在运行的任务，启动定时刷新
-        if (hasRunningTasks() && recentTasksTimer === null) {
-          recentTasksTimer = window.setInterval(() => {
-            loadRecentTasks();
-          }, 5000);
-        }
-      }, 2000);
-    } catch (error: any) {
-      console.error(error);
-    } finally {
-      loading.value = false;
-    }
-  }).catch(() => {
-    ElMessageBox.close();
-  });
+  deployDialog.visible = true;
+  // Preload
+  deployDialog.data.forEach(row => loadVersions(row));
 }
 
 // 重启

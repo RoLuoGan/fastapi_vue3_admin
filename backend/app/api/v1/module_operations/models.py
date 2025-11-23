@@ -36,6 +36,7 @@ class ServiceModel(CreatorMixin):
     status: Mapped[bool] = mapped_column(Boolean(), default=True, nullable=False, comment="是否启用(True:启用 False:禁用)")
     project: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="运维管理项目")
     module_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="模块分组")
+    current_package_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="当前软件包版本号")
     
     # 关联关系（多对多）
     nodes: Mapped[List["NodeModel"]] = relationship(
@@ -43,6 +44,32 @@ class ServiceModel(CreatorMixin):
         back_populates="services",
         lazy="selectin"
     )
+    
+    # 关联关系（一对多）
+    packages: Mapped[List["ServicePackageModel"]] = relationship(
+        "ServicePackageModel",
+        back_populates="service",
+        lazy="selectin",
+        cascade="all, delete-orphan"
+    )
+
+
+class ServicePackageModel(CreatorMixin):
+    """
+    服务软件包表
+    """
+    __tablename__ = "operations_service_package"
+    __table_args__ = ({'comment': '服务软件包表'})
+    __loader_options__ = ["creator"]
+
+    service_id: Mapped[int] = mapped_column(Integer, ForeignKey("operations_service.id", ondelete="CASCADE"), nullable=False, index=True, comment="服务模块ID")
+    version: Mapped[str] = mapped_column(String(50), nullable=False, comment="版本号")
+    package_path: Mapped[str] = mapped_column(String(255), nullable=False, comment="版本包路径")
+    md5: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, comment="文件MD5")
+    size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="文件大小(字节)")
+    
+    # 关联
+    service: Mapped["ServiceModel"] = relationship("ServiceModel", back_populates="packages", lazy="selectin")
 
 
 class NodeModel(CreatorMixin):

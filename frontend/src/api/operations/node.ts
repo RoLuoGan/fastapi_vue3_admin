@@ -138,17 +138,17 @@ const NodeAPI = {
     console.log('[NodeAPI.executeTask] 任务类型:', data.task_type);
     console.log('[NodeAPI.executeTask] 操作类型:', data.operator_type);
     console.log('[NodeAPI.executeTask] 模块数量:', data.operator_metas?.length || 0);
-    
+
     if (data.operator_metas && Array.isArray(data.operator_metas)) {
       data.operator_metas.forEach((meta, idx) => {
         console.log(`[NodeAPI.executeTask] 模块 ${idx + 1}: 服务ID=${meta.service_id}, 节点ID列表=[${meta.node_ids.join(', ')}], 节点数量=${meta.node_ids.length}`);
       });
     }
-    
+
     console.log('[NodeAPI.executeTask] 完整请求数据 (JSON):');
     console.log(JSON.stringify(data, null, 2));
     console.log('==========================================');
-    
+
     return request<ApiResponse>({
       url: `${API_PATH}/execute`,
       method: "post",
@@ -204,6 +204,7 @@ export interface ServiceTable {
   updated_at?: string;
   creator?: creatorType;
   nodes?: NodeTable[];
+  current_package_version?: string;
 }
 
 export interface ServiceForm {
