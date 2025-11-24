@@ -1,0 +1,13 @@
+---
+- name: Deploy Service
+  hosts: "{{ target_hosts }}"
+  tasks:
+    - name: Copy package to remote
+      copy:
+        src: "{{ local_pkg_path }}"
+        dest: "{{ remote_pkg_path }}"
+        mode: '0644'
+
+    - name: Execute deploy command
+      shell: "{{ deploy_command }}"
+

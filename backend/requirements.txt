@@ -37,3 +37,4 @@ openai==1.55.2              # ai 大模型
 oss2==2.18.4                # 阿里云对象存储
 rich==13.9.4
 sqlglot[rs]==27.8.0         # sql 解析
+ansible                     # ansible 自动化运维工具

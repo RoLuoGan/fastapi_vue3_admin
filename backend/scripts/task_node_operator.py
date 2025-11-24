@@ -4,10 +4,10 @@
 通过任务类型命名，方便调用
 """
 
-import sys
 import json
-import subprocess
 import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Callable
 
@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from base_batch_task_executor import BaseBatchTaskExecutor
 
-EXTENSION_NAME = "demo_task_script.py"
+DEFAULT_REMOTE_DIR = "/tmp"
 
 
 class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
@@ -61,68 +61,120 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
     
     def _execute_task(self) -> int:
         """
-        执行具体任务逻辑：调用外部脚本，由脚本自身处理节点与业务逻辑
+        根据任务类型执行节点操作逻辑。
         """
-        extension_script = Path(__file__).parent / EXTENSION_NAME
-        if not extension_script.exists():
-            raise FileNotFoundError(f"未找到示例脚本: {extension_script}")
-        
-        self.write_log(f"开始执行外部脚本 {extension_script}")
-        self.output_progress(5, "初始化外部脚本")
-        
-        env_override = {
-            "BATCH_TASK_ID": str(self.task_id),
-            "BATCH_TASK_TYPE": self.task_type,
-            "BATCH_LOG_PATH": str(self.log_path),
-            "BATCH_OPERATOR_METAS": json.dumps(self.operator_metas, ensure_ascii=False, default=str),
-        }
-        
-        return self._run_external_script(extension_script, env_override=env_override)
+        try:
+            if self.task_type == "deploy":
+                return self._execute_deploy()
+            if self.task_type == "restart":
+                return self._execute_restart()
+            
+            self.write_log(f"[ERROR] 未知任务类型: {self.task_type}")
+            return 1
+        except Exception as exc:
+            self.write_log(f"[ERROR] 执行 {self.task_type} 任务失败: {exc}")
+            import traceback
+            self.write_log(f"[ERROR] 异常堆栈:\n{traceback.format_exc()}")
+            return 1
 
-    def _run_external_script(
-        self,
-        script_path: Path,
-        *,
-        env_override: Optional[Dict[str, str]] = None,
-    ) -> int:
+    # ------------------------------------------------------------------
+    # 新部署逻辑
+    # ------------------------------------------------------------------
+    def _execute_deploy(self) -> int:
         """
-        调用外部脚本并将输出写入日志
+        从 OSS 下载版本包并通过 Ansible Playbook 分发与执行。
         """
-        cmd = [sys.executable, str(script_path)]
-        env = os.environ.copy()
-        if env_override:
-            env.update({k: str(v) for k, v in env_override.items() if v is not None})
+        # Playbook 路径
+        playbook_path = Path(__file__).parent / "ansible_playbooks" / "deploy.yml"
         
-        self.write_log(f"调用外部脚本: {' '.join(cmd)}")
+        inventory_metas = []
         
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=env,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-            text=True,
+        # 1. 准备阶段：下载所有需要的文件，并构建带变量的元数据
+        for meta in self.operator_metas:
+            package_key = meta.get("package_path")
+            if not package_key:
+                self.write_log(f"[WARNING] 模块 {meta.get('service_name')} 缺少 package_path，跳过")
+                continue
+            
+            try:
+                local_pkg = self.download_oss_object(package_key)
+                remote_path = meta.get("remote_path") or f"{DEFAULT_REMOTE_DIR}/{Path(local_pkg).name}"
+                deploy_command = meta.get("deploy_command") or f"echo 'Deploy {remote_path}' && tar -xf {remote_path} -C {DEFAULT_REMOTE_DIR}"
+                
+                # 构造带 ansbile_vars 的 meta 副本
+                new_meta = meta.copy()
+                new_meta["ansible_vars"] = {
+                    "local_pkg_path": str(local_pkg),
+                    "remote_pkg_path": remote_path,
+                    "deploy_command": deploy_command,
+                }
+                inventory_metas.append(new_meta)
+                
+            except Exception as e:
+                self.write_log(f"[ERROR] 准备模块 {meta.get('service_name')} 失败: {e}")
+                continue
+
+        if not inventory_metas:
+            self.write_log("[ERROR] 没有有效的部署任务可执行")
+            return 1
+
+        # 2. 生成包含所有主机的 Inventory
+        inventory_path = self.generate_ansible_inventory(inventory_metas)
+        
+        # 3. 批量执行 Playbook
+        self.write_log(f"批量执行部署 Playbook: {playbook_path} -> Hosts: all")
+        
+        # 变量已通过 inventory 的 [group:vars] 传递，这里只需要指定 target_hosts
+        # 注意：Playbook 中 hosts: "{{ target_hosts }}"，我们需要让它匹配所有组
+        # 可以传入 target_hosts="all" 或者特定的组列表。这里使用 "all" 简单直接。
+        
+        rc = self.run_ansible_playbook(
+            playbook=playbook_path,
+            inventory=inventory_path,
+            extra_vars={"target_hosts": "all"}
         )
         
-        if process.stdout:
-            for raw_line in iter(process.stdout.readline, ''):
-                line = raw_line.rstrip('\r\n')
-                if line:
-                    self.write_log(f"[脚本输出] {line}")
-            process.stdout.close()
+        return 0 if rc == 0 else 1
+    
+    def _execute_restart(self) -> int:
+        """
+        使用 Ansible Playbook 执行重启指令。
+        """
+        playbook_path = Path(__file__).parent / "ansible_playbooks" / "restart.yml"
+        inventory_metas = []
         
-        return_code = process.wait()
-
-        if return_code == 0:
-            self.output_progress(100, "外部脚本执行完成")
-            self.write_log("外部脚本执行结束，返回码 0")
-        else:
-            self.output_progress(100, f"外部脚本执行失败 ({return_code})")
-            self.write_log(f"[ERROR] 外部脚本执行失败，退出码: {return_code}")
+        # 1. 准备变量
+        for meta in self.operator_metas:
+            restart_target = meta.get("restart_target") or meta.get("service_name") or f"service_{meta.get('service_id')}"
+            restart_command = meta.get("restart_command") or f"systemctl restart {restart_target}"
+            
+            new_meta = meta.copy()
+            new_meta["ansible_vars"] = {
+                "restart_command": restart_command,
+            }
+            inventory_metas.append(new_meta)
+            
+        if not inventory_metas:
+            self.write_log("[ERROR] 没有有效的重启任务可执行")
+            return 1
+            
+        # 2. 生成 Inventory
+        inventory_path = self.generate_ansible_inventory(inventory_metas)
         
-        return return_code
+        # 3. 批量执行
+        self.write_log(f"批量执行重启 Playbook: {playbook_path} -> Hosts: all")
+        
+        rc = self.run_ansible_playbook(
+            playbook=playbook_path,
+            inventory=inventory_path,
+            extra_vars={"target_hosts": "all"}
+        )
+        
+        return 0 if rc == 0 else 1
+    
+    def _resolve_group_name(self, meta: Dict[str, Any]) -> str:
+        name = meta.get("service_name") or f"service_{meta.get('service_id')}"
+        return name.replace(" ", "_")
 
 
 def execute_in_process(
