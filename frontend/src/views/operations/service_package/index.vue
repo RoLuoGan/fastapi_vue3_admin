@@ -154,10 +154,11 @@ const rules = {
 // Load Services
 async function loadServices() {
     try {
-        const res = await NodeAPI.getServiceTree();
+        const res = await NodeAPI.getServiceTree({ status: true });
         serviceOptions.value = res.data.data || [];
     } catch(e) {
-        console.error(e);
+        console.error('加载服务模块失败:', e);
+        ElMessage.error('加载服务模块失败');
     }
 }
 
@@ -188,7 +189,11 @@ function handleSelectionChange(selection: any[]) {
     selectedIds.value = selection.map(item => item.id);
 }
 
-function handleAdd() {
+async function handleAdd() {
+    // 确保服务模块数据已加载
+    if (serviceOptions.value.length === 0) {
+        await loadServices();
+    }
     dialog.type = 'add';
     dialog.title = '新增版本包';
     dialog.visible = true;
@@ -262,7 +267,11 @@ async function submitForm() {
     });
 }
 
-function handleOneClickUpload() {
+async function handleOneClickUpload() {
+    // 确保服务模块数据已加载
+    if (serviceOptions.value.length === 0) {
+        await loadServices();
+    }
     oneClickDialog.visible = true;
     oneClickForm.service_id = undefined;
     oneClickForm.date_str = '';

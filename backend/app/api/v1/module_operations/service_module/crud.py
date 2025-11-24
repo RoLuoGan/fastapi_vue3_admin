@@ -21,6 +21,14 @@ class ServiceCRUD(CRUDBase[ServiceModel, ServiceCreateSchema, ServiceUpdateSchem
 
     async def get_by_id_crud(self, id: int, preload: Optional[List[Union[str, Any]]] = None) -> Optional[ServiceModel]:
         return await self.get(id=id, preload=preload)
+    
+    async def get_obj_by_id_crud(self, id: int, preload: Optional[List[Union[str, Any]]] = None) -> Optional[ServiceModel]:
+        """获取服务模块详情（别名方法）"""
+        return await self.get(id=id, preload=preload)
+    
+    async def update_obj_crud(self, id: int, data: Union[ServiceUpdateSchema, Dict]) -> Optional[ServiceModel]:
+        """更新服务模块（别名方法，支持字典）"""
+        return await self.update(id=id, data=data)
 
     async def get_list_crud(
         self,

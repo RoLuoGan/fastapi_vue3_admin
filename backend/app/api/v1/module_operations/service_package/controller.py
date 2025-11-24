@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, Path
 from fastapi.responses import JSONResponse
 from redis.asyncio.client import Redis
 
-from app.core.dependencies import AuthPermission, get_redis
+from app.core.dependencies import AuthPermission, redis_getter
 from app.common.response import SuccessResponse
 from app.api.v1.module_system.auth.schema import AuthSchema
 from app.core.router_class import OperationLogRoute
@@ -30,7 +30,7 @@ async def create(
     is_latest: bool = Form(True),
     file: UploadFile = File(None),
     auth: AuthSchema = Depends(AuthPermission(["operations:package:create"])),
-    redis: Redis = Depends(get_redis)
+    redis: Redis = Depends(redis_getter)
 ) -> JSONResponse:
     data = ServicePackageCreateSchema(
         service_id=service_id,
@@ -63,7 +63,7 @@ async def delete(
 async def one_click_upload(
     data: OneClickUploadSchema,
     auth: AuthSchema = Depends(AuthPermission(["operations:package:create"])),
-    redis: Redis = Depends(get_redis)
+    redis: Redis = Depends(redis_getter)
 ) -> JSONResponse:
     result = await ServicePackageService.one_click_upload_service(auth, redis, data)
     return SuccessResponse(data=result)

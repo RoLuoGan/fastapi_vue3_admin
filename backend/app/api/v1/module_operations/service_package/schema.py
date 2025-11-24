@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
+from app.core.validator import DateTimeStr
+
 class ServicePackageBase(BaseModel):
     service_id: int
     version: Optional[str] = None
@@ -26,8 +28,8 @@ class ServicePackageOutSchema(ServicePackageBase):
     id: int
     version: str
     package_path: str
-    created_at: Optional[datetime]
-    updated_at: Optional[datetime]
+    created_at: Optional[DateTimeStr] = None
+    updated_at: Optional[DateTimeStr] = None
     model_config = ConfigDict(from_attributes=True)
 
 class OneClickUploadSchema(BaseModel):

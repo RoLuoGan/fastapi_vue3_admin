@@ -11,6 +11,7 @@ from app.api.v1.module_system.auth.schema import AuthSchema
 from app.api.v1.module_operations.models import ServicePackageModel
 from app.api.v1.module_operations.service_package.crud import ServicePackageCRUD
 from app.api.v1.module_operations.service_package.schema import ServicePackageCreateSchema, ServicePackageUpdateSchema, OneClickUploadSchema, ServicePackageOutSchema
+from app.api.v1.module_operations.service_package.param import ServicePackageQueryParam
 from app.api.v1.module_operations.service_module.crud import ServiceCRUD
 from app.utils.oss_util import OSSUtil
 
@@ -47,11 +48,17 @@ class ServicePackageService:
         elif not data.package_path:
             raise CustomException(msg="Package path is required if no file is uploaded")
 
+        # 保存 is_latest 标志，因为模型中没有这个字段
+        is_latest = data.is_latest
+        
+        # 创建数据字典，排除 is_latest 字段（模型中没有这个字段）
+        create_data = data.model_dump(exclude={'is_latest'})
+        
         # Create DB Record
-        obj = await ServicePackageCRUD(auth).create_obj_crud(data=data)
+        obj = await ServicePackageCRUD(auth).create_obj_crud(data=create_data)
         
         # Update Service Module if is_latest
-        if data.is_latest:
+        if is_latest:
             await ServiceCRUD(auth).update_obj_crud(service.id, {"current_package_version": data.version})
             
         return ServicePackageOutSchema.model_validate(obj).model_dump()
@@ -61,10 +68,15 @@ class ServicePackageService:
         obj = await ServicePackageCRUD(auth).get_obj_by_id_crud(id)
         if not obj:
             raise CustomException(msg="Package not found")
-            
-        updated_obj = await ServicePackageCRUD(auth).update_obj_crud(id, data)
         
-        if data.is_latest:
+        # 保存 is_latest 标志，因为模型中没有这个字段
+        is_latest = data.is_latest
+        
+        # 更新数据字典，排除 is_latest 字段
+        update_data = data.model_dump(exclude={'is_latest'}, exclude_unset=True)
+        updated_obj = await ServicePackageCRUD(auth).update_obj_crud(id, update_data)
+        
+        if is_latest:
             await ServiceCRUD(auth).update_obj_crud(updated_obj.service_id, {"current_package_version": updated_obj.version})
             
         return ServicePackageOutSchema.model_validate(updated_obj).model_dump()
@@ -129,6 +141,7 @@ class ServicePackageService:
         await OSSUtil.copy_file(redis, source_path, target_path)
 
         # Create Package Record
+        # 注意：is_latest 不在模型中，需要单独处理
         pkg_data = ServicePackageCreateSchema(
             service_id=service.id,
             version=timestamp_str + "00", # Use timestamp as version? Spec: "Version (auto generated... 2025112214300100)"
@@ -138,7 +151,9 @@ class ServicePackageService:
             is_latest=True
         )
         
-        pkg = await ServicePackageCRUD(auth).create_obj_crud(data=pkg_data)
+        # 创建数据字典，排除 is_latest 字段
+        create_data = pkg_data.model_dump(exclude={'is_latest'})
+        pkg = await ServicePackageCRUD(auth).create_obj_crud(data=create_data)
         
         # Update Service
         await ServiceCRUD(auth).update_obj_crud(service.id, {"current_package_version": pkg.version})

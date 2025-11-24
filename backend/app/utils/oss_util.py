@@ -3,7 +3,7 @@ import oss2
 import logging
 from typing import Tuple, Optional
 from app.api.v1.module_system.params.service import ParamsService
-from app.core.database import RedisCURD
+from app.core.redis_crud import RedisCURD
 from app.core.logger import logger
 
 class OSSUtil:
