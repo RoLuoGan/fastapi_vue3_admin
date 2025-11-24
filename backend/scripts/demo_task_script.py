@@ -61,31 +61,64 @@ def run_demo(operator_metas: List[Dict[str, Any]]) -> None:
         "清理现场并收尾",
     ]
     
+    if not operator_metas:
+        log("[WARNING] 未提供操作元数据，退出")
+        return
+    
     total_nodes = sum(len(meta.get("nodes", [])) for meta in operator_metas) or 1
     processed_nodes = 0
     
-    for meta_idx, meta in enumerate(operator_metas, 1):
-        service_name = meta.get("service_name") or f"服务ID:{meta.get('service_id')}"
-        nodes = meta.get("nodes", [])
-        log(f"模块 {meta_idx}/{len(operator_metas)} -> {service_name}, 节点数: {len(nodes)}")
-        
-        for node in nodes:
-            node_ip = node.get("ip", "unknown")
-            node_port = node.get("port", 22)
-            log(f"  - 节点 {node_ip}:{node_port} 开始 Demo 流程")
-            
-            for idx, step in enumerate(steps, 1):
-                log(f"    步骤 {idx}/{len(steps)}: {step}")
-                time.sleep(2)
-            
-            log(f"  - 节点 {node_ip}:{node_port} Demo 流程完成")
-            processed_nodes += 1
-            progress(processed_nodes / total_nodes * 100, f"{service_name}::{node_ip}")
-        
-        if not nodes:
-            log("  - 未配置节点，跳过")
+    log(f"开始处理 {len(operator_metas)} 个模块，共 {total_nodes} 个节点")
     
-    log("Demo 脚本执行完成，所有节点处理结束")
+    try:
+        for meta_idx, meta in enumerate(operator_metas, 1):
+            service_id = meta.get("service_id")
+            service_name = meta.get("service_name") or f"服务ID:{service_id}"
+            nodes = meta.get("nodes", [])
+            
+            log(f"=" * 60)
+            log(f"模块 {meta_idx}/{len(operator_metas)}: {service_name} (ID:{service_id}) - {len(nodes)} 个节点")
+            log(f"=" * 60)
+            
+            if not nodes:
+                log(f"  - 模块 {service_name} 未配置节点，跳过")
+                continue
+            
+            for node_idx, node in enumerate(nodes, 1):
+                node_ip = node.get("ip", "unknown")
+                node_port = node.get("port", 22)
+                log(f"  [{node_idx}/{len(nodes)}] 节点 {node_ip}:{node_port} 开始 Demo 流程")
+                
+                try:
+                    for step_idx, step in enumerate(steps, 1):
+                        log(f"    步骤 {step_idx}/{len(steps)}: {step}")
+                        time.sleep(2)
+                    
+                    log(f"  [{node_idx}/{len(nodes)}] 节点 {node_ip}:{node_port} Demo 流程完成")
+                    processed_nodes += 1
+                    
+                    # 更新进度
+                    progress_value = int((processed_nodes / total_nodes) * 100) if total_nodes > 0 else 100
+                    progress(progress_value, f"{service_name}::{node_ip}")
+                    
+                except Exception as e:
+                    log(f"  [ERROR] 节点 {node_ip}:{node_port} 处理失败: {e}")
+                    import traceback
+                    log(f"  [ERROR] 异常堆栈: {traceback.format_exc()}")
+                    # 继续处理下一个节点，不中断整个流程
+                    processed_nodes += 1
+                    continue
+            
+            log(f"模块 {meta_idx}/{len(operator_metas)} ({service_name}) 处理完成")
+        
+        log("=" * 60)
+        log(f"Demo 脚本执行完成，共处理 {processed_nodes}/{total_nodes} 个节点")
+        
+    except Exception as e:
+        log(f"[ERROR] 执行过程中发生异常: {e}")
+        import traceback
+        log(f"[ERROR] 异常堆栈: {traceback.format_exc()}")
+        raise
 
 
 def main():

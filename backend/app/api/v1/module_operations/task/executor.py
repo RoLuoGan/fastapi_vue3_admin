@@ -265,8 +265,7 @@ class TaskExecutor:
                 try:
                     module = import_module(script_module_name)
                 except ModuleNotFoundError:
-                    logger.warning(f"未找到任务类型脚本: {script_module_name}，使用默认脚本 execute_batch_task")
-                    module = import_module("scripts.execute_batch_task")
+                    raise CustomException(f"未找到任务类型脚本: {script_module_name}")
                 
                 loop = asyncio.get_running_loop()
                 log_queue: asyncio.Queue[str] = asyncio.Queue()

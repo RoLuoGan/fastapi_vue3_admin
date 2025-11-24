@@ -27,8 +27,19 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
         super().print_init_info()
         
         # 打印模块和节点信息
+        if not self.operator_metas:
+            self.write_log("[WARNING] operator_metas 为空")
+            self.write_log("=" * 60)
+            return
+        
+        self.write_log(f"模块数量: {len(self.operator_metas)}")
         total_nodes = 0
+        
         for idx, meta in enumerate(self.operator_metas, 1):
+            if not isinstance(meta, dict):
+                self.write_log(f"[WARNING] 模块 {idx} 不是字典类型: {type(meta)}")
+                continue
+                
             service_id = meta.get("service_id")
             service_name = meta.get("service_name", f"服务ID:{service_id}")
             nodes = meta.get("nodes", [])
@@ -36,10 +47,14 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
             total_nodes += node_count
             
             self.write_log(f"模块 {idx}: {service_name} (ID:{service_id}) - {node_count} 个节点")
-            for node in nodes:
-                node_ip = node.get("ip") if isinstance(node, dict) else getattr(node, "ip", "unknown")
-                node_port = node.get("port") if isinstance(node, dict) else getattr(node, "port", 22)
-                self.write_log(f"  - {node_ip}:{node_port}")
+            for node_idx, node in enumerate(nodes, 1):
+                if isinstance(node, dict):
+                    node_ip = node.get("ip", "unknown")
+                    node_port = node.get("port", 22)
+                else:
+                    node_ip = getattr(node, "ip", "unknown")
+                    node_port = getattr(node, "port", 22)
+                self.write_log(f"  - [{node_idx}/{node_count}] {node_ip}:{node_port}")
         
         self.write_log(f"总节点数: {total_nodes}")
         self.write_log("=" * 60)
