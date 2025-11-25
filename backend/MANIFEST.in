@@ -1,0 +1,8 @@
+# 包含所有必要的非 Python 文件
+include README.md
+include alembic.ini
+recursive-include app *.json *.j2 *.sql *.md
+recursive-include templates *.j2
+recursive-include static *
+recursive-include scripts *.json *.yml *.yaml
+

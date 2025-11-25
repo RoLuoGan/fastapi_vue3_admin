@@ -6,8 +6,9 @@
 
 import json
 import os
-import subprocess
+import time
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Callable
 
@@ -15,9 +16,6 @@ from typing import Dict, Any, Optional, List, Callable
 sys.path.insert(0, str(Path(__file__).parent))
 
 from base_batch_task_executor import BaseBatchTaskExecutor
-
-DEFAULT_REMOTE_DIR = "/tmp"
-
 
 class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
     """节点操作任务执行器（部署/重启）"""
@@ -43,6 +41,12 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
             service_id = meta.get("service_id")
             service_name = meta.get("service_name", f"服务ID:{service_id}")
             nodes = meta.get("nodes", [])
+            
+            # 兼容性处理：如果 nodes 为空但 node_ids 存在，尝试打印警告
+            if not nodes and meta.get("node_ids"):
+                self.write_log(f"[WARNING] 模块 {service_name} (ID:{service_id}) 缺少节点详情 (nodes)，仅有 IDs: {meta.get('node_ids')}")
+                self.write_log(f"[DEBUG] Meta keys: {list(meta.keys())}")
+            
             node_count = len(nodes)
             total_nodes += node_count
             
@@ -86,7 +90,7 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
         """
         # Playbook 路径
         playbook_path = Path(__file__).parent / "ansible_playbooks" / "deploy.yml"
-        
+        back_date = datetime.now().strftime("%m%d")
         inventory_metas = []
         
         # 1. 准备阶段：下载所有需要的文件，并构建带变量的元数据
@@ -98,15 +102,17 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
             
             try:
                 local_pkg = self.download_oss_object(package_key)
-                remote_path = meta.get("remote_path") or f"{DEFAULT_REMOTE_DIR}/{Path(local_pkg).name}"
-                deploy_command = meta.get("deploy_command") or f"echo 'Deploy {remote_path}' && tar -xf {remote_path} -C {DEFAULT_REMOTE_DIR}"
+                remote_path = meta.get("remote_path") or f"/data/service/{meta.get('service_name')}"
+                restart_command = meta.get("restart_command") or f"supervisorctl restart {meta.get('service_name')}"
                 
                 # 构造带 ansbile_vars 的 meta 副本
                 new_meta = meta.copy()
                 new_meta["ansible_vars"] = {
+                    "service_name": meta.get("service_name"),
                     "local_pkg_path": str(local_pkg),
                     "remote_pkg_path": remote_path,
-                    "deploy_command": deploy_command,
+                    "restart_command": restart_command,
+                    "back_date": back_date,
                 }
                 inventory_metas.append(new_meta)
                 
@@ -146,7 +152,7 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
         # 1. 准备变量
         for meta in self.operator_metas:
             restart_target = meta.get("restart_target") or meta.get("service_name") or f"service_{meta.get('service_id')}"
-            restart_command = meta.get("restart_command") or f"systemctl restart {restart_target}"
+            restart_command = meta.get("restart_command") or f"supervisorctl restart {restart_target}"
             
             new_meta = meta.copy()
             new_meta["ansible_vars"] = {
@@ -163,6 +169,7 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
         
         # 3. 批量执行
         self.write_log(f"批量执行重启 Playbook: {playbook_path} -> Hosts: all")
+        time.sleep(10)
         
         rc = self.run_ansible_playbook(
             playbook=playbook_path,

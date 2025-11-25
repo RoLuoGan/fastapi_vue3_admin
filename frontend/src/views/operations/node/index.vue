@@ -352,9 +352,12 @@ import DictAPI from "@/api/system/dict";
 import { onBeforeUnmount } from "vue";
 
 // 操作元数据类型定义
-interface OperatorMeta {
+interface PageOperatorMeta {
   service_id: number;
+  service_name?: string;
   node_ids: number[];
+  nodes?: { id: number; ip: string }[];
+  [key: string]: any;
 }
 
 const queryFormRef = ref();
@@ -1037,7 +1040,7 @@ async function handleDeleteService(ids: number[]) {
 /**
  * 构建操作元数据（按服务模块分组节点）
  */
-function buildOperatorMetas(nodeIds: number[]): OperatorMeta[] {
+function buildOperatorMetas(nodeIds: number[]): PageOperatorMeta[] {
   const metaMap = new Map<number, number[]>();
   
   // 获取当前真正选中的行（使用 getSelectionRows 确保准确性）
@@ -1142,17 +1145,25 @@ async function confirmDeploy() {
             if (row.version) {
                 const found = row.versions.find((v: any) => v.version === row.version);
                 if (found) {
-                    operatorMetas.push({
+                    // 确保传递 service_name 和 nodes (包含IP)
+                    const meta = {
                         service_id: row.service_id,
+                        service_name: row.service_name || '',
                         node_ids: row.node_ids,
+                        // 只传递必要的节点信息，避免传递多余字段或Proxy对象
+                        nodes: row.nodes ? row.nodes.map((n: any) => ({ id: n.id, ip: n.ip })) : [], 
                         version: row.version,
                         package_path: found.package_path,
                         md5: found.md5
-                    });
+                    };
+                    console.log('[confirmDeploy] Row Meta:', meta);
+                    operatorMetas.push(meta);
                 }
             }
         }
         
+        console.log('[confirmDeploy] 提交的任务参数:', operatorMetas);
+
         const requestData: any = {
             task_type: 'node_operator',
             operator_type: 'deploy',
@@ -1192,13 +1203,14 @@ async function handleDeploy() {
       const service = pageTableData.value.find((s: any) => s.id === meta.service_id);
       return {
           service_id: meta.service_id,
-          service_name: meta.service_name,
+          service_name: meta.service_name || service?.name || '',
           node_count: meta.node_ids.length,
           current_version: service?.current_package_version,
           version: service?.current_package_version || '',
           versions: [],
           loading: false,
-          node_ids: meta.node_ids
+          node_ids: meta.node_ids,
+          nodes: meta.nodes || []
       };
   });
   

@@ -29,14 +29,14 @@ class ServicePackageService:
 
         # Handle File Upload
         if file:
-            # Path format: /{system}/{date}/{module_name}_{timestamp}_{uuid}.tgz
-            system_name = "paas" # Default
+            # Path format: package/{system}/{date}/{module_name}_{timestamp}_{uuid}.tar
+            system_name = "paas软件包"
             date_str = datetime.now().strftime("%Y%m%d")
             timestamp_str = datetime.now().strftime("%Y%m%d%H%M%S")
             uuid_str = str(uuid.uuid4())[:8]
-            ext = file.filename.split('.')[-1] if '.' in file.filename else 'tgz'
+            ext = file.filename.split('.')[-1] if '.' in file.filename else 'tar'
             
-            target_path = f"{system_name}/{date_str}/{service.name}_{timestamp_str}_{uuid_str}.{ext}"
+            target_path = f"package/{system_name}/{date_str}/{service.name}_{timestamp_str}_{uuid_str}.{ext}"
             
             content = await file.read()
             upload_result = await OSSUtil.upload_file(redis, target_path, content)
@@ -106,15 +106,16 @@ class ServicePackageService:
             raise CustomException(msg="Service module not found")
 
         # Source Path Logic
-        # Spec: /{date}/{module_name}/{module_name}.tgz
+        # Spec: package/2025-paas版本文件/2025${time}/${I}.tar
         # Date defaults to today MMDD or user provided
         now = datetime.now()
         if data.date_str:
             date_part = data.date_str
         else:
             date_part = now.strftime("%m%d") # e.g. 1123
-            
-        source_path = f"/{date_part}/{service.name}/{service.name}.tgz"
+        year_part = now.strftime("%Y")
+        
+        source_path = f"/package/{year_part}-paas版本文件/{year_part}{date_part}/{service.name}.tar"
         # Remove leading slash if OSS SDK doesn't like it? OSS usually doesn't care or prefers no leading slash. 
         # But let's try with/without. Usually keys don't start with /.
         if source_path.startswith("/"):
@@ -122,13 +123,13 @@ class ServicePackageService:
 
         # Target Path Logic
         # Spec: {system}/{date}/{module_name}_{timestamp}_{uuid}.tgz
-        # System: paas
+        # System: paas软件包
         # Date: YYYYMMDD (e.g. 20251113)
-        system_name = "paas"
+        system_name = "paas软件包"
         target_date = now.strftime("%Y%m%d")
         timestamp_str = now.strftime("%Y%m%d%H%M%S")
         uuid_str = str(uuid.uuid4())[:8]
-        target_path = f"{system_name}/{target_date}/{service.name}_{timestamp_str}_{uuid_str}.tgz"
+        target_path = f"package/{system_name}/{target_date}/{service.name}_{timestamp_str}_{uuid_str}.tar"
 
         # Check Source & Copy
         try:

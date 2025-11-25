@@ -12,6 +12,10 @@ backend/venv
 backend/logs
 backend/*.db
 backend/env/*
+backend/workspace/*
+backend/devops_admin.egg-info/*
+backend/dist/*
+backend/scripts/oss_config.json
 
 frontend/__pycache__
 frontend/.vscode

@@ -177,7 +177,6 @@ class TaskExecutor:
         base_auth: AuthSchema,
         task_id: int,
         log_path: Path,
-        nodes: List[Any],
         task_type: str,
         operator_type: str,
         operator_metas: Optional[List[dict]] = None,
@@ -190,7 +189,6 @@ class TaskExecutor:
             base_auth: 基础认证信息
             task_id: 任务ID
             log_path: 日志文件路径
-            nodes: 节点列表
             task_type: 任务类型 (node_operator, server_operator 等)
             operator_type: 操作类型 (deploy, restart, init 等)
             operator_metas: 操作元数据（任意结构，直接透传）
@@ -262,10 +260,15 @@ class TaskExecutor:
                 # 通过 import_module 导入脚本模块
                 if str(settings.BASE_DIR) not in sys.path:
                     sys.path.append(str(settings.BASE_DIR))
-                try:
-                    module = import_module(script_module_name)
-                except ModuleNotFoundError:
-                    raise CustomException(f"未找到任务类型脚本: {script_module_name}")
+                
+                def load_module_sync():
+                    try:
+                        return import_module(script_module_name)
+                    except ModuleNotFoundError:
+                        raise CustomException(f"未找到任务类型脚本: {script_module_name}")
+
+                # 将模块导入放入线程池执行，防止 import 阻塞事件循环
+                module = await asyncio.to_thread(load_module_sync)
                 
                 loop = asyncio.get_running_loop()
                 log_queue: asyncio.Queue[str] = asyncio.Queue()
@@ -282,7 +285,24 @@ class TaskExecutor:
                     nonlocal last_flush_time
                     line_count = 0
                     while True:
-                        line = await log_queue.get()
+                        try:
+                            # 计算超时时间
+                            current_time = time.time()
+                            time_since_last_flush = current_time - last_flush_time
+                            timeout = max(0.1, BUFFER_FLUSH_INTERVAL - time_since_last_flush)
+                            
+                            # 如果缓冲区有数据，设置超时时间；否则一直等待
+                            if log_buffer:
+                                line = await asyncio.wait_for(log_queue.get(), timeout=timeout)
+                            else:
+                                line = await log_queue.get()
+                        except asyncio.TimeoutError:
+                            # 超时，刷新缓冲区
+                            if log_buffer:
+                                await flush_log_buffer()
+                                last_flush_time = time.time()
+                            continue
+
                         if line is None:
                             # 刷新剩余的缓冲区
                             logger.debug(f"[Executor] 日志队列结束，刷新剩余缓冲区 task_id={task_id}, total_lines={line_count}")
@@ -299,21 +319,10 @@ class TaskExecutor:
                         
                         # 添加到缓冲区
                         log_buffer.append(line)
-                        current_time = time.time()
-                        time_since_last_flush = current_time - last_flush_time
                         
-                        logger.debug(f"[Executor] 日志行已添加到缓冲区 task_id={task_id}, buffer_size={len(log_buffer)}/{BUFFER_SIZE}, time_since_last_flush={time_since_last_flush:.2f}s")
-                        
-                        # 如果缓冲区达到阈值，刷新到存储
-                        should_flush = False
+                        # 检查是否需要立即刷新（基于缓冲区大小）
                         if len(log_buffer) >= BUFFER_SIZE:
                             logger.debug(f"[Executor] 缓冲区达到阈值，触发刷新 task_id={task_id}, buffer_size={len(log_buffer)}")
-                            should_flush = True
-                        elif time_since_last_flush >= BUFFER_FLUSH_INTERVAL and len(log_buffer) > 0:
-                            logger.debug(f"[Executor] 时间间隔达到，触发刷新 task_id={task_id}, time_since_last_flush={time_since_last_flush:.2f}s, buffer_size={len(log_buffer)}")
-                            should_flush = True
-                        
-                        if should_flush:
                             await flush_log_buffer()
                             last_flush_time = time.time()
                 
@@ -451,10 +460,12 @@ class TaskExecutor:
                 
                 logger.error(f"批次任务执行失败: {exc}\n{error_traceback}")
             finally:
-                # 关闭 Redis 连接
-                if redis:
-                    try:
-                        await redis.close()
-                    except Exception as e:
-                        logger.warning(f"关闭 Redis 连接失败: {e}")
+                # 注意: 这里不关闭 Redis 连接，因为 Redis 连接是复用的（如果是由依赖注入传入的）
+                # 如果在这里关闭了，会影响其他请求
+                pass
+                # if redis:
+                #     try:
+                #         await redis.close()
+                #     except Exception as e:
+                #         logger.warning(f"关闭 Redis 连接失败: {e}")
 

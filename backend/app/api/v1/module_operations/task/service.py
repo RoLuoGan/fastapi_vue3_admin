@@ -18,7 +18,8 @@ from app.core.logger import logger
 from app.api.v1.module_system.auth.schema import AuthSchema
 
 from ..service_module.crud import ServiceCRUD
-from ..server.crud import ServerCRUD
+from ..server.crud import ServerCRUD  # noqa: F401
+# from ..server.crud import ServerCRUD
 from .crud import TaskCRUD
 from .schema import TaskOutSchema, TaskDetailSchema, TaskLogSchema
 from .executor import TaskExecutor
@@ -55,7 +56,6 @@ class TaskService:
     async def _create_task(
         cls,
         auth: AuthSchema,
-        nodes: List[Any],
         validated_metas: List[Dict],
         task_type: str,
         operator_type: str,
@@ -66,7 +66,6 @@ class TaskService:
         
         参数:
         - auth: 认证信息
-        - nodes: 所有节点列表
         - validated_metas: 操作元数据列表（任意结构，直接透传）
         - task_type: 任务类型 (node_operator, server_operator 等)
         - operator_type: 操作类型 (deploy, restart, init 等)
@@ -99,7 +98,7 @@ class TaskService:
         # 不在这里写入初始日志，让脚本统一输出初始化信息和树形结构的日志
         
         await auth.db.commit()
-        return {"task": task, "log_path": log_path, "nodes": nodes}
+        return {"task": task, "log_path": log_path}
 
     @classmethod
     async def get_recent_tasks_service(cls, auth: AuthSchema, limit: int = 20, task_type: Optional[str] = None) -> List[Dict]:
@@ -205,23 +204,21 @@ class TaskService:
         if not operator_metas:
             raise CustomException(msg="操作元数据不能为空")
 
-        # 获取节点信息（用于创建任务记录，但不做业务逻辑验证）
-        nodes = []
+        # 3. 异步执行任务
+        # 注意: 这里使用 asyncio.create_task 将任务放入后台执行
+        # API 会立即返回任务 ID，前端可以通过轮询或 SSE 流式获取日志
+        
+        # 计算节点数量 (直接从元数据计算，不查询 DB)
+        node_count = 0
         for meta in operator_metas:
-            # 尝试从 operator_metas 中提取 node_ids
-            node_ids = meta.get("node_ids", [])
-            if not node_ids:
-                continue
-            
-            for node_id in node_ids:
-                node = await ServerCRUD(auth).get_by_id_crud(id=node_id, preload=["service", "services"])
-                if node:
-                    nodes.append(node)
+            if "nodes" in meta and isinstance(meta["nodes"], list):
+                node_count += len(meta["nodes"])
+            elif "node_ids" in meta and isinstance(meta["node_ids"], list):
+                node_count += len(meta["node_ids"])
 
         # 创建任务记录（直接透传所有参数）
         task_record = await cls._create_task(
             auth=auth,
-            nodes=nodes if nodes else [],
             validated_metas=operator_metas,  # 直接使用原始 operator_metas
             task_type=task_type,  # 传递真实的 task_type
             operator_type=operator_type  # 传递 operator_type
@@ -236,7 +233,6 @@ class TaskService:
                 base_auth=auth,
                 task_id=task.id,
                 log_path=log_path,
-                nodes=nodes if nodes else [],
                 task_type=task_type,
                 operator_type=operator_type,
                 operator_metas=operator_metas,  # 直接透传，不做加工
@@ -247,7 +243,7 @@ class TaskService:
         return {
             "message": "任务已启动",
             "task_id": task.id,
-            "node_count": len(nodes),
+            "node_count": node_count,
             "task_type": task_type,
             "operator_type": operator_type,
         }

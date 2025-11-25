@@ -49,10 +49,11 @@ class BaseBatchTaskExecutor(ABC):
         self.progress_handler = progress_handler
         self.ansible_bin = os.environ.get("ANSIBLE_BIN", "ansible")
         self.ansible_playbook_bin = os.environ.get("ANSIBLE_PLAYBOOK_BIN", "ansible-playbook")
+        # 当前工作目录
         self.work_dir = Path(
             os.environ.get(
                 "BATCH_WORK_DIR",
-                Path(__file__).parent / "workspace" / f"batch_task_{self.task_id}",
+                Path.cwd() / "workspace" / f"batch_task_{self.task_id}",
             )
         )
         self.work_dir.mkdir(parents=True, exist_ok=True)

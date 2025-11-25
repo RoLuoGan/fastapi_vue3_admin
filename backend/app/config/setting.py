@@ -11,6 +11,44 @@ from urllib.parse import quote_plus
 from app.common.enums import EnvironmentEnum
 
 
+def _resolve_env_file(env: str) -> Path:
+    """
+    获取环境配置文件路径，支持以下优先级：
+    1. 显式指定 ENV_FILE（绝对或相对路径）
+    2. 指定 ENV_DIR（目录） + .env.<env>
+    3. 当前工作目录下的 env/.env.<env>
+    4. 包内置目录 backend/env/.env.<env>
+    """
+    env_file_name = f".env.{env}"
+
+    # 1) 完整路径
+    explicit_env_file = os.getenv("ENV_FILE")
+    if explicit_env_file:
+        env_path = Path(explicit_env_file).expanduser().resolve()
+        if env_path.exists():
+            return env_path
+
+    candidates = []
+
+    # 2) 指定目录
+    explicit_env_dir = os.getenv("ENV_DIR")
+    if explicit_env_dir:
+        candidates.append(Path(explicit_env_dir))
+
+    # 3) 当前工作目录
+    candidates.append(Path.cwd() / "env")
+
+    # 4) 包内目录
+    candidates.append(Path(__file__).parent.parent.parent / "env")
+
+    for candidate in candidates:
+        env_path = (candidate / env_file_name).expanduser().resolve()
+        if env_path.exists():
+            return env_path
+
+    raise FileNotFoundError(f"环境配置文件不存在: {candidates[-1] / env_file_name}")
+
+
 class Settings(BaseSettings):
     """系统配置类"""
     model_config = SettingsConfigDict(
@@ -360,11 +398,8 @@ def get_settings() -> Settings:
     env = os.getenv('ENVIRONMENT', EnvironmentEnum.DEV.value)
     if env not in [e.value for e in EnvironmentEnum]:
         raise ValueError(f"无效的环境配置: {env}")
-    
-    env_file = Path(__file__).parent.parent.parent / "env" / f".env.{env}"
 
-    if not env_file.exists():
-        raise FileNotFoundError(f"环境配置文件不存在: {env_file}")
+    env_file = _resolve_env_file(env)
 
     return Settings(_env_file=env_file)
 

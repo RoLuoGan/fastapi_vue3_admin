@@ -2,12 +2,24 @@
 - name: Deploy Service
   hosts: "{{ target_hosts }}"
   tasks:
-    - name: Copy package to remote
-      copy:
+
+    - name: mkdir /data/service/bak/{{ back_date }}
+      file:
+        path: "/data/service/bak/{{ back_date }}"
+        state: directory
+      become: true
+
+    - name: mv lib --> {{ service_name }}_{{ back_date }}_lib
+      shell: mv /data/service/{{ service_name }}/lib /data/service/bak/{{ back_date }}/{{ service_name }}_{{ back_date }}_lib
+      become: true
+
+    - name: unarchive package to remote
+      unarchive:
         src: "{{ local_pkg_path }}"
         dest: "{{ remote_pkg_path }}"
-        mode: '0644'
-
-    - name: Execute deploy command
-      shell: "{{ deploy_command }}"
+      become: true
+      
+    - name: Execute restart command
+      shell: "{{ restart_command }}"
+      become: true
 
