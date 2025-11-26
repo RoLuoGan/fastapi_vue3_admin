@@ -65,7 +65,7 @@ class ServicePackageModel(CreatorMixin):
     service_id: Mapped[int] = mapped_column(Integer, ForeignKey("operations_service.id", ondelete="CASCADE"), nullable=False, index=True, comment="服务模块ID")
     version: Mapped[str] = mapped_column(String(50), nullable=False, comment="版本号")
     package_path: Mapped[str] = mapped_column(String(255), nullable=False, comment="版本包路径")
-    md5: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, comment="文件MD5")
+    md5: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, comment="文件MD5（支持OSS ETag格式）")
     size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="文件大小(字节)")
     
     # 关联

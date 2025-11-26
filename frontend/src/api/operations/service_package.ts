@@ -65,6 +65,7 @@ const ServicePackageAPI = {
       headers: {
         "Content-Type": "multipart/form-data",
       },
+      timeout: 60 * 1000 * 5, // 5 minutes
     });
   },
 
@@ -89,6 +90,7 @@ const ServicePackageAPI = {
       url: `${API_PATH}/one-click-upload`,
       method: "post",
       data: data,
+      timeout: 60 * 1000 * 5, // 5 minutes
     });
   },
 };

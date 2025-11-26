@@ -147,7 +147,7 @@ class ServicePackageService:
             service_id=service.id,
             version=timestamp_str + "00", # Use timestamp as version? Spec: "Version (auto generated... 2025112214300100)"
             package_path=target_path,
-            md5=meta.get("etag"),
+            md5=meta.get("etag")[:64],
             size=meta.get("size"),
             is_latest=True
         )

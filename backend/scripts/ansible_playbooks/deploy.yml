@@ -1,6 +1,7 @@
 ---
 - name: Deploy Service
   hosts: "{{ target_hosts }}"
+  gather_facts: false
   tasks:
 
     - name: mkdir /data/service/bak/{{ back_date }}
