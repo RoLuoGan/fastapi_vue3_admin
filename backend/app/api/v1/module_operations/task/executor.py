@@ -254,12 +254,12 @@ class TaskExecutor:
                 
                 # 根据 task_type 确定脚本模块名
                 # 脚本命名规则: task_{task_type}.py
-                script_module_name = f"scripts.task_{task_type}"
+                script_module_name = f"task_{task_type}"
                 logger.info(f"导入批次任务脚本模块: {script_module_name}")
                 
                 # 通过 import_module 导入脚本模块
-                if str(settings.BASE_DIR) not in sys.path:
-                    sys.path.append(str(settings.BASE_DIR))
+                # 添加当前工作scripts目录
+                sys.path.append(str(Path.cwd().joinpath("scripts")))
                 
                 def load_module_sync():
                     try:

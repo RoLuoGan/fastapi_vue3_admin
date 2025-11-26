@@ -4,5 +4,3 @@ include alembic.ini
 recursive-include app *.json *.j2 *.sql *.md
 recursive-include templates *.j2
 recursive-include static *
-recursive-include scripts *.json *.yml *.yaml
-
