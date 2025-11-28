@@ -57,6 +57,12 @@
                   <el-button v-hasPerm="['operations:node:restart']" type="info" icon="RefreshRight" :disabled="selectNodeIds.length === 0" @click="handleRestart">重启</el-button>
                 </el-col>
                 <el-col :span="1.5">
+                  <el-button v-hasPerm="['operations:node:start']" type="success" icon="VideoPlay" :disabled="selectNodeIds.length === 0" @click="handleStart">启动</el-button>
+                </el-col>
+                <el-col :span="1.5">
+                  <el-button v-hasPerm="['operations:node:stop']" type="danger" icon="VideoPause" :disabled="selectNodeIds.length === 0" @click="handleStop">停止</el-button>
+                </el-col>
+                <el-col :span="1.5">
                   <el-button type="primary" icon="ArrowDown" plain @click="handleExpandAll">全部展开</el-button>
                 </el-col>
                 <el-col :span="1.5">
@@ -152,8 +158,8 @@
                 <div>
                   <span class="task-ip">任务 #{{ task.id }}</span>
                 </div>
-                <el-tag size="small" :type="task.task_type === 'deploy' ? 'success' : 'warning'">
-                  {{ task.task_type === 'deploy' ? '部署' : '重启' }}
+                <el-tag size="small" :type="getTaskTypeTag(task.task_type)">
+                  {{ getTaskTypeLabel(task.task_type) }}
                 </el-tag>
               </div>
               <div class="task-progress">
@@ -208,133 +214,6 @@
       </template>
     </el-dialog>
 
-    <!-- 服务模块弹窗 -->
-    <el-dialog v-model="serviceDialogVisible.visible" :title="serviceDialogVisible.title" @close="handleCloseServiceDialog">
-      <template v-if="serviceDialogVisible.type === 'detail'">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="服务名称" :span="2">{{ serviceDetailFormData.name }}</el-descriptions-item>
-          <el-descriptions-item label="项目">{{ serviceDetailFormData.project || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="模块分组">{{ serviceDetailFormData.module_group || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="服务编码">{{ serviceDetailFormData.code || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <el-tag v-if="serviceDetailFormData.status" type="success">启用</el-tag>
-            <el-tag v-else type="danger">停用</el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="创建时间" :span="2">{{ serviceDetailFormData.created_at }}</el-descriptions-item>
-          <el-descriptions-item label="描述" :span="2">{{ serviceDetailFormData.description || '-' }}</el-descriptions-item>
-        </el-descriptions>
-      </template>
-      <template v-else>
-        <el-form ref="serviceFormRef" :model="serviceFormData" :rules="serviceRules" label-suffix=":" label-width="100px">
-          <el-form-item label="服务名称" prop="name">
-            <el-input v-model="serviceFormData.name" placeholder="请输入服务名称" :maxlength="100" />
-          </el-form-item>
-          <el-form-item label="服务编码" prop="code">
-            <el-input v-model="serviceFormData.code" placeholder="请输入服务编码" :maxlength="50" />
-          </el-form-item>
-          <el-form-item label="运维管理项目" prop="project">
-            <el-select v-model="serviceFormData.project" placeholder="请选择运维管理项目" clearable style="width: 100%">
-              <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="模块分组" prop="module_group">
-            <el-select v-model="serviceFormData.module_group" placeholder="请选择模块分组" clearable style="width: 100%">
-              <el-option v-for="item in moduleGroupOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="状态" prop="status">
-            <el-switch
-              v-model="serviceFormData.status"
-              inline-prompt
-              active-text="启用"
-              inactive-text="停用"
-              :active-value="true"
-              :inactive-value="false"
-            />
-          </el-form-item>
-          <el-form-item label="描述" prop="description">
-            <el-input v-model="serviceFormData.description" :rows="4" type="textarea" placeholder="请输入描述" :maxlength="255" show-word-limit />
-          </el-form-item>
-        </el-form>
-      </template>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="handleCloseServiceDialog">取消</el-button>
-          <el-button v-if="serviceDialogVisible.type !== 'detail'" type="primary" @click="handleSubmitService">确定</el-button>
-          <el-button v-else type="primary" @click="handleCloseServiceDialog">确定</el-button>
-        </div>
-      </template>
-    </el-dialog>
-
-    <!-- 节点弹窗 -->
-    <el-dialog v-model="nodeDialogVisible.visible" :title="nodeDialogVisible.title" @close="handleCloseNodeDialog">
-      <template v-if="nodeDialogVisible.type === 'detail'">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="服务名称" :span="2">{{ nodeDetailFormData.service_name }}</el-descriptions-item>
-          <el-descriptions-item label="节点IP">{{ nodeDetailFormData.ip }}</el-descriptions-item>
-          <el-descriptions-item label="端口">{{ nodeDetailFormData.port || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="运维管理项目">{{ nodeDetailFormData.project || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="机房">{{ nodeDetailFormData.idc || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="服务器标签">{{ nodeDetailFormData.tags || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <el-tag v-if="nodeDetailFormData.status" type="success">启用</el-tag>
-            <el-tag v-else type="danger">停用</el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="创建时间" :span="2">{{ nodeDetailFormData.created_at }}</el-descriptions-item>
-          <el-descriptions-item label="描述" :span="2">{{ nodeDetailFormData.description || '-' }}</el-descriptions-item>
-        </el-descriptions>
-      </template>
-      <template v-else>
-        <el-form ref="nodeFormRef" :model="nodeFormData" :rules="nodeRules" label-suffix=":" label-width="100px">
-          <el-form-item label="服务模块" prop="service_id">
-            <el-select v-model="nodeFormData.service_id" placeholder="请选择服务模块" style="width: 100%">
-              <el-option v-for="service in serviceOptions" :key="service.id" :label="service.name || ''" :value="service.id || 0" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="节点IP" prop="ip">
-            <el-input v-model="nodeFormData.ip" placeholder="请输入节点IP地址" :maxlength="50" />
-          </el-form-item>
-          <el-form-item label="端口" prop="port">
-            <el-input-number v-model="nodeFormData.port" controls-position="right" :min="1" :max="65535" :value="nodeFormData.port || 22" style="width: 100%" />
-          </el-form-item>
-          <el-form-item label="运维管理项目" prop="project">
-            <el-select v-model="nodeFormData.project" placeholder="请选择运维管理项目" clearable style="width: 100%">
-              <el-option v-for="item in projectOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="机房" prop="idc">
-            <el-select v-model="nodeFormData.idc" placeholder="请选择机房" clearable style="width: 100%">
-              <el-option v-for="item in idcOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="服务器标签" prop="tags">
-            <el-select v-model="nodeFormData.tags" placeholder="请选择服务器标签" clearable style="width: 100%">
-              <el-option v-for="item in tagsOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="状态" prop="status">
-            <el-switch
-              v-model="nodeFormData.status"
-              inline-prompt
-              active-text="启用"
-              inactive-text="停用"
-              :active-value="true"
-              :inactive-value="false"
-            />
-          </el-form-item>
-          <el-form-item label="描述" prop="description">
-            <el-input v-model="nodeFormData.description" :rows="4" type="textarea" placeholder="请输入描述" :maxlength="255" show-word-limit />
-          </el-form-item>
-        </el-form>
-      </template>
-      <template #footer>
-        <div class="dialog-footer">
-          <el-button @click="handleCloseNodeDialog">取消</el-button>
-          <el-button v-if="nodeDialogVisible.type !== 'detail'" type="primary" @click="handleSubmitNode">确定</el-button>
-          <el-button v-else type="primary" @click="handleCloseNodeDialog">确定</el-button>
-        </div>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -344,10 +223,10 @@ defineOptions({
   inheritAttrs: false,
 });
 
-import NodeAPI, { ServiceTable, NodeTable, TaskTable, ServiceForm, NodeForm, ServiceQueryParam } from "@/api/operations/node";
+import NodeAPI, { ServiceTable, TaskTable, ServiceQueryParam } from "@/api/operations/node";
 import ServicePackageAPI from "@/api/operations/service_package";
 import { useRouter } from "vue-router";
-import { QuestionFilled, CircleCheck, CircleClose, Loading, WarningFilled, ArrowDown, ArrowUp } from "@element-plus/icons-vue";
+import { QuestionFilled, CircleCheck, CircleClose, Loading, WarningFilled, ArrowDown, ArrowUp, VideoPlay, VideoPause } from "@element-plus/icons-vue";
 import DictAPI from "@/api/system/dict";
 import { onBeforeUnmount } from "vue";
 
@@ -360,9 +239,9 @@ interface PageOperatorMeta {
   [key: string]: any;
 }
 
+type TaskTagType = "primary" | "success" | "warning" | "info" | "danger";
+
 const queryFormRef = ref();
-const serviceFormRef = ref();
-const nodeFormRef = ref();
 const dataTableRef = ref();
 const total = ref(0);
 const selectIds = ref<number[]>([]);
@@ -382,42 +261,6 @@ const queryFormData = reactive<ServiceQueryParam>({
   module_group: undefined,
 });
 
-// 服务模块表单
-const serviceFormData = reactive<ServiceForm>({
-  id: undefined,
-  name: '',
-  code: '',
-  status: true,
-  description: undefined,
-});
-
-// 节点表单
-const nodeFormData = reactive<NodeForm>({
-  id: undefined,
-  service_id: undefined,
-  ip: '',
-  port: 22,
-  status: true,
-  description: undefined,
-  project: undefined,
-  idc: undefined,
-  tags: undefined,
-});
-
-// 服务模块弹窗状态
-const serviceDialogVisible = reactive({
-  title: "",
-  visible: false,
-  type: 'create' as 'create' | 'update' | 'detail',
-});
-
-// 节点弹窗状态
-const nodeDialogVisible = reactive({
-  title: "",
-  visible: false,
-  type: 'create' as 'create' | 'update' | 'detail',
-});
-
 // 部署确认弹窗状态
 const deployDialog = reactive({
   visible: false,
@@ -427,16 +270,13 @@ const deployTotalNodes = computed(() => {
     return deployDialog.data.reduce((sum, item) => sum + (item.node_count || 0), 0);
 });
 
-// 详情表单
-const serviceDetailFormData = ref<ServiceTable>({});
-const nodeDetailFormData = ref<NodeTable>({});
-
 // 服务模块选项（用于节点表单）
 const serviceOptions = ref<ServiceTable[]>([]);
 
 // 任务列表
 const taskList = ref<TaskTable[]>([]);
 const router = useRouter();
+const supportedTaskTypes = ["deploy", "restart", "start", "stop"];
 
 // 子节点联动标志（防止父节点取消子节点时的连锁反应）
 const isChildLinkage = ref(false);
@@ -446,19 +286,6 @@ const projectOptions = ref<any[]>([]);
 const moduleGroupOptions = ref<any[]>([]);
 const idcOptions = ref<any[]>([]);
 const tagsOptions = ref<any[]>([]);
-
-// 表单验证规则
-const serviceRules = reactive({
-  name: [{ required: true, message: "请输入服务名称", trigger: "blur" }],
-});
-
-const nodeRules = reactive({
-  service_id: [{ required: true, message: "请选择服务模块", trigger: "change" }],
-  ip: [
-    { required: true, message: "请输入节点IP地址", trigger: "blur" },
-    { pattern: /^(\d{1,3}\.){3}\d{1,3}$/, message: "IP地址格式不正确", trigger: "blur" },
-  ],
-});
 
 /**
  * 生成行的唯一Key（解决父子节点ID冲突问题）
@@ -846,8 +673,8 @@ async function loadRecentTasks() {
     const response = await NodeAPI.getRecentTasks(20);
     // 过滤出节点操作相关的任务（deploy、restart）
     const allTasks = response.data.data || [];
-    taskList.value = allTasks.filter((task: TaskTable) => 
-      task.task_type === 'deploy' || task.task_type === 'restart'
+    taskList.value = allTasks.filter(
+      (task: TaskTable) => !!task.task_type && supportedTaskTypes.includes(task.task_type)
     );
     
     // 检查是否有正在运行的任务，如果没有则停止定时刷新
@@ -877,166 +704,6 @@ async function handleRefresh() {
 }
 
 
-// 打开服务模块弹窗
-async function handleOpenServiceDialog(type: 'create' | 'update' | 'detail', id?: number) {
-  serviceDialogVisible.type = type;
-  if (id) {
-    const response = await NodeAPI.getServiceDetail(id);
-    if (type === 'detail') {
-      serviceDialogVisible.title = "服务模块详情";
-      Object.assign(serviceDetailFormData.value, response.data.data);
-    } else if (type === 'update') {
-      serviceDialogVisible.title = "修改服务模块";
-      Object.assign(serviceFormData, response.data.data);
-    }
-  } else {
-    serviceDialogVisible.title = "新增服务模块";
-    serviceFormData.id = undefined;
-    serviceFormData.name = '';
-    serviceFormData.code = '';
-    serviceFormData.status = true;
-    serviceFormData.description = undefined;
-    serviceFormData.project = undefined;
-    serviceFormData.module_group = undefined;
-  }
-  serviceDialogVisible.visible = true;
-}
-
-// 关闭服务模块弹窗
-async function handleCloseServiceDialog() {
-  serviceDialogVisible.visible = false;
-  if (serviceFormRef.value) {
-    serviceFormRef.value.resetFields();
-  }
-}
-
-// 提交服务模块
-async function handleSubmitService() {
-  serviceFormRef.value.validate(async (valid: any) => {
-    if (valid) {
-      loading.value = true;
-      const id = serviceFormData.id;
-      try {
-        if (id) {
-          await NodeAPI.updateService(id, serviceFormData);
-        } else {
-          await NodeAPI.createService(serviceFormData);
-        }
-        serviceDialogVisible.visible = false;
-        handleRefresh();
-      } catch (error: any) {
-        console.error(error);
-      } finally {
-        loading.value = false;
-      }
-    }
-  });
-}
-
-// 打开节点弹窗
-async function handleOpenNodeDialog(type: 'create' | 'update' | 'detail', id?: number) {
-  nodeDialogVisible.type = type;
-  if (id) {
-    const response = await NodeAPI.getNodeDetail(id);
-    if (type === 'detail') {
-      nodeDialogVisible.title = "节点详情";
-      Object.assign(nodeDetailFormData.value, response.data.data);
-    } else if (type === 'update') {
-      nodeDialogVisible.title = "修改节点";
-      Object.assign(nodeFormData, response.data.data);
-    }
-  } else {
-    nodeDialogVisible.title = "新增节点";
-    nodeFormData.id = undefined;
-    nodeFormData.service_id = undefined;
-    nodeFormData.ip = '';
-    nodeFormData.port = 22;
-    nodeFormData.status = true;
-    nodeFormData.description = undefined;
-    nodeFormData.project = undefined;
-    nodeFormData.idc = undefined;
-    nodeFormData.tags = undefined;
-  }
-  nodeDialogVisible.visible = true;
-}
-
-// 关闭节点弹窗
-async function handleCloseNodeDialog() {
-  nodeDialogVisible.visible = false;
-  if (nodeFormRef.value) {
-    nodeFormRef.value.resetFields();
-  }
-}
-
-// 提交节点
-async function handleSubmitNode() {
-  nodeFormRef.value.validate(async (valid: any) => {
-    if (valid) {
-      loading.value = true;
-      const id = nodeFormData.id;
-      try {
-        if (id) {
-          await NodeAPI.updateNode(id, nodeFormData);
-        } else {
-          await NodeAPI.createNode(nodeFormData);
-        }
-        nodeDialogVisible.visible = false;
-        handleRefresh();
-      } catch (error: any) {
-        console.error(error);
-      } finally {
-        loading.value = false;
-      }
-    }
-  });
-}
-
-// 删除节点
-async function handleDeleteNode(ids: number[]) {
-  if (ids.length === 0) {
-    ElMessage.warning("请至少选择一个节点");
-    return;
-  }
-  ElMessageBox.confirm("确认删除选中的节点?", "警告", {
-    confirmButtonText: "确定",
-    cancelButtonText: "取消",
-    type: "warning",
-  }).then(async () => {
-    try {
-      loading.value = true;
-      await NodeAPI.deleteNode(ids);
-      handleRefresh();
-    } catch (error: any) {
-      console.error(error);
-    } finally {
-      loading.value = false;
-    }
-  }).catch(() => {
-    ElMessageBox.close();
-  });
-}
-
-// 删除服务模块
-async function handleDeleteService(ids: number[]) {
-  ElMessageBox.confirm("确认删除该服务模块? 删除后将同时删除该服务下的所有节点!", "警告", {
-    confirmButtonText: "确定",
-    cancelButtonText: "取消",
-    type: "warning",
-  }).then(async () => {
-    try {
-      loading.value = true;
-      await NodeAPI.deleteService(ids);
-      handleRefresh();
-    } catch (error: any) {
-      console.error(error);
-    } finally {
-      loading.value = false;
-    }
-  }).catch(() => {
-    ElMessageBox.close();
-  });
-}
-
 /**
  * 构建操作元数据（按服务模块分组节点）
  */
@@ -1053,7 +720,7 @@ function buildOperatorMetas(nodeIds: number[]): PageOperatorMeta[] {
   console.log('[buildOperatorMetas] 选中的行Key列表:', Array.from(selectedRowKeys));
   
   // 遍历所有服务模块
-  const serviceMetaMap = new Map<number, { service_name: string; node_ids: number[]; nodes: any[] }>();
+  const serviceMetaMap = new Map<number, { service_name: string; node_ids: number[]; nodes: any[]; project?: string; module_group?: string }>();
   
   pageTableData.value.forEach((service: any) => {
     if (service.nodes && Array.isArray(service.nodes)) {
@@ -1069,7 +736,9 @@ function buildOperatorMetas(nodeIds: number[]): PageOperatorMeta[] {
         serviceMetaMap.set(service.id, {
           service_name: service.name || '',
           node_ids: serviceNodeIds,
-          nodes: selectedNodes
+          nodes: selectedNodes,
+          project: service.project,
+          module_group: service.module_group
         });
         console.log(`[buildOperatorMetas] 服务 ${service.name} (ID: ${service.id}) 包含 ${serviceNodeIds.length} 个选中节点: [${serviceNodeIds.join(', ')}]`);
       }
@@ -1088,7 +757,9 @@ function buildOperatorMetas(nodeIds: number[]): PageOperatorMeta[] {
       service_id,
       service_name: meta.service_name,
       node_ids: meta.node_ids,
-      nodes: nodes  // 添加节点信息，包含 ip
+      nodes: nodes,  // 添加节点信息，包含 ip
+      project: meta.project,
+      module_group: meta.module_group
     };
   });
   
@@ -1154,7 +825,9 @@ async function confirmDeploy() {
                         nodes: row.nodes ? row.nodes.map((n: any) => ({ id: n.id, ip: n.ip })) : [], 
                         version: row.version,
                         package_path: found.package_path,
-                        md5: found.md5
+                        md5: found.md5,
+                        project: row.project,
+                        module_group: row.module_group
                     };
                     console.log('[confirmDeploy] Row Meta:', meta);
                     operatorMetas.push(meta);
@@ -1210,7 +883,9 @@ async function handleDeploy() {
           versions: [],
           loading: false,
           node_ids: meta.node_ids,
-          nodes: meta.nodes || []
+          nodes: meta.nodes || [],
+          project: meta.project || service?.project,
+          module_group: meta.module_group || service?.module_group
       };
   });
   
@@ -1266,6 +941,86 @@ async function handleRestart() {
   });
 }
 
+// 启动
+async function handleStart() {
+  if (selectNodeIds.value.length === 0) {
+    ElMessage.warning("请至少选择一个节点");
+    return;
+  }
+
+  const operatorMetas = buildOperatorMetas(selectNodeIds.value);
+  ElMessageBox.confirm("确认启动选中的节点?", "提示", {
+    confirmButtonText: "确定",
+    cancelButtonText: "取消",
+    type: "info",
+  }).then(async () => {
+    try {
+      loading.value = true;
+      const requestData: any = {
+        task_type: 'node_operator',
+        operator_type: 'start',
+        operator_metas: operatorMetas
+      };
+      await NodeAPI.start(requestData);
+      handleRefresh();
+      setTimeout(async () => {
+        await loadRecentTasks();
+        if (hasRunningTasks() && recentTasksTimer === null) {
+          recentTasksTimer = window.setInterval(() => {
+            loadRecentTasks();
+          }, 5000);
+        }
+      }, 2000);
+    } catch (error: any) {
+      console.error(error);
+    } finally {
+      loading.value = false;
+    }
+  }).catch(() => {
+    ElMessageBox.close();
+  });
+}
+
+// 停止
+async function handleStop() {
+  if (selectNodeIds.value.length === 0) {
+    ElMessage.warning("请至少选择一个节点");
+    return;
+  }
+
+  const operatorMetas = buildOperatorMetas(selectNodeIds.value);
+  ElMessageBox.confirm("确认停止选中的节点?", "提示", {
+    confirmButtonText: "确定",
+    cancelButtonText: "取消",
+    type: "warning",
+  }).then(async () => {
+    try {
+      loading.value = true;
+      const requestData: any = {
+        task_type: 'node_operator',
+        operator_type: 'stop',
+        operator_metas: operatorMetas
+      };
+      await NodeAPI.stop(requestData);
+      handleRefresh();
+      setTimeout(async () => {
+        await loadRecentTasks();
+        if (hasRunningTasks() && recentTasksTimer === null) {
+          recentTasksTimer = window.setInterval(() => {
+            loadRecentTasks();
+          }, 5000);
+        }
+      }, 2000);
+    } catch (error: any) {
+      console.error(error);
+    } finally {
+      loading.value = false;
+    }
+  }).catch(() => {
+    ElMessageBox.close();
+  });
+}
+
 // 获取任务状态文本
 function getTaskStatusText(status: string) {
   const statusMap: Record<string, string> = {
@@ -1275,6 +1030,30 @@ function getTaskStatusText(status: string) {
     failed: '失败',
   };
   return statusMap[status] || status;
+}
+
+const taskTypeMetaMap: Record<string, { label: string; tag: TaskTagType }> = {
+  deploy: { label: '部署', tag: 'success' },
+  restart: { label: '重启', tag: 'info' },
+  start: { label: '启动', tag: 'success' },
+  stop: { label: '停止', tag: 'danger' },
+};
+
+const defaultTaskTypeMeta: { label: string; tag: TaskTagType } = { label: '-', tag: 'info' };
+
+function getTaskTypeMeta(type?: string) {
+  if (!type) {
+    return defaultTaskTypeMeta;
+  }
+  return taskTypeMetaMap[type] || { label: type, tag: 'info' as TaskTagType };
+}
+
+function getTaskTypeLabel(type?: string) {
+  return getTaskTypeMeta(type).label;
+}
+
+function getTaskTypeTag(type?: string) {
+  return getTaskTypeMeta(type).tag;
 }
 
 function progressStatus(status?: string) {

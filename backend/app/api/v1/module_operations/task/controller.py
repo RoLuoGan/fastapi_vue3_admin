@@ -28,7 +28,15 @@ router = APIRouter(route_class=OperationLogRoute, prefix="/node", tags=["任务�
 async def execute_task_controller(
     data: ExecuteTaskSchema,
     redis: Redis = Depends(redis_getter),
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:deploy", "operations:node:restart", "operations:node:init"])),
+    auth: AuthSchema = Depends(
+        AuthPermission([
+            "operations:node:deploy",
+            "operations:node:restart",
+            "operations:node:start",
+            "operations:node:stop",
+            "operations:node:init",
+        ])
+    ),
 ) -> JSONResponse:
     logger.info(f"收到任务请求 - 任务类型: {data.task_type}, 操作类型: {data.operator_type}, 元数据数: {len(data.operator_metas)}")
     

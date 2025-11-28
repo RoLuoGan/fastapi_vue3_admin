@@ -84,7 +84,7 @@
     <el-dialog title="一键上传" v-model="oneClickDialog.visible" width="500">
         <el-form :model="oneClickForm" label-width="100px">
              <el-form-item label="服务模块">
-                <el-select v-model="oneClickForm.service_id" filterable style="width: 100%">
+                <el-select v-model="oneClickForm.service_ids" multiple filterable placeholder="请选择服务模块（可多选）" style="width: 100%">
                     <el-option v-for="item in serviceOptions" :key="item.id || 0" :label="item.name" :value="item.id || 0" />
                 </el-select>
              </el-form-item>
@@ -142,7 +142,7 @@ const oneClickDialog = reactive({
     visible: false
 });
 const oneClickForm = reactive({
-    service_id: undefined as number | undefined,
+    service_ids: [] as number[],
     date_str: ''
 });
 const oneClickLoading = ref(false);
@@ -273,22 +273,22 @@ async function handleOneClickUpload() {
         await loadServices();
     }
     oneClickDialog.visible = true;
-    oneClickForm.service_id = undefined;
+    oneClickForm.service_ids = [];
     oneClickForm.date_str = '';
 }
 
 async function submitOneClick() {
-    if (!oneClickForm.service_id) {
-        ElMessage.warning('请选择服务模块');
+    if (!oneClickForm.service_ids || oneClickForm.service_ids.length === 0) {
+        ElMessage.warning('请至少选择一个服务模块');
         return;
     }
     oneClickLoading.value = true;
     try {
         await ServicePackageAPI.oneClickUpload({
-            service_id: oneClickForm.service_id!,
+            service_ids: oneClickForm.service_ids,
             date_str: oneClickForm.date_str || undefined
         });
-        ElMessage.success('上传成功');
+        ElMessage.success(`成功上传 ${oneClickForm.service_ids.length} 个服务模块的版本包`);
         oneClickDialog.visible = false;
         handleQuery();
     } catch(e) {

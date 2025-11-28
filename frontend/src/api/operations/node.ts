@@ -168,6 +168,18 @@ const NodeAPI = {
     console.log('[NodeAPI.restart] 接收到的数据:', data);
     return this.executeTask(data);
   },
+
+  // 启动（使用统一接口）
+  start(data: ExecuteTaskRequest) {
+    console.log('[NodeAPI.start] 接收到的数据:', data);
+    return this.executeTask(data);
+  },
+
+  // 停止（使用统一接口）
+  stop(data: ExecuteTaskRequest) {
+    console.log('[NodeAPI.stop] 接收到的数据:', data);
+    return this.executeTask(data);
+  },
 };
 
 export default NodeAPI;

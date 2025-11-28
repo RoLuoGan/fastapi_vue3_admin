@@ -36,7 +36,7 @@ export interface ServicePackageUpdateForm {
 }
 
 export interface OneClickUploadForm {
-  service_id: number;
+  service_ids: number[];
   date_str?: string;
 }
 

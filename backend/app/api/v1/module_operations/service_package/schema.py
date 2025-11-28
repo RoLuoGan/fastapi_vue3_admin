@@ -33,6 +33,6 @@ class ServicePackageOutSchema(ServicePackageBase):
     model_config = ConfigDict(from_attributes=True)
 
 class OneClickUploadSchema(BaseModel):
-    service_id: int
+    service_ids: list[int]
     date_str: Optional[str] = None # e.g. "1123" or "20251123"
 

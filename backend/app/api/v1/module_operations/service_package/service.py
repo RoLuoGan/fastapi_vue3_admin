@@ -25,7 +25,7 @@ class ServicePackageService:
 
         # Generate version if not provided
         if not data.version:
-            data.version = datetime.now().strftime("%Y%m%d%H%M%S") + "00"
+            data.version = datetime.now().strftime("%Y%m%d%H%M%S")
 
         # Handle File Upload
         if file:
@@ -100,66 +100,95 @@ class ServicePackageService:
         await ServicePackageCRUD(auth).delete_obj_crud(ids)
 
     @classmethod
-    async def one_click_upload_service(cls, auth: AuthSchema, redis: Redis, data: OneClickUploadSchema) -> Dict:
-        service = await ServiceCRUD(auth).get_obj_by_id_crud(data.service_id)
-        if not service:
-            raise CustomException(msg="Service module not found")
-
-        # Source Path Logic
-        # Spec: package/2025-paas版本文件/2025${time}/${I}.tar
-        # Date defaults to today MMDD or user provided
+    async def one_click_upload_service(cls, auth: AuthSchema, redis: Redis, data: OneClickUploadSchema) -> list[Dict]:
+        """
+        批量一键上传服务软件包
+        返回成功上传的包列表
+        """
+        if not data.service_ids or len(data.service_ids) == 0:
+            raise CustomException(msg="请至少选择一个服务模块")
+        
+        results = []
+        errors = []
+        
+        # 准备日期参数
         now = datetime.now()
         if data.date_str:
             date_part = data.date_str
         else:
             date_part = now.strftime("%m%d") # e.g. 1123
         year_part = now.strftime("%Y")
-        
-        source_path = f"/package/{year_part}-paas版本文件/{year_part}{date_part}/{service.name}.tar"
-        # Remove leading slash if OSS SDK doesn't like it? OSS usually doesn't care or prefers no leading slash. 
-        # But let's try with/without. Usually keys don't start with /.
-        if source_path.startswith("/"):
-            source_path = source_path[1:]
-
-        # Target Path Logic
-        # Spec: {system}/{date}/{module_name}_{timestamp}_{uuid}.tgz
-        # System: paas软件包
-        # Date: YYYYMMDD (e.g. 20251113)
         system_name = "paas软件包"
         target_date = now.strftime("%Y%m%d")
-        timestamp_str = now.strftime("%Y%m%d%H%M%S")
-        uuid_str = str(uuid.uuid4())[:8]
-        target_path = f"package/{system_name}/{target_date}/{service.name}_{timestamp_str}_{uuid_str}.tar"
-
-        # Check Source & Copy
-        try:
-            meta = await OSSUtil.get_object_meta(redis, source_path)
-        except Exception as e:
-            logger.error(f"Failed to find source package at {source_path}: {e}")
-            # Try with leading slash if failed? Or maybe date format is different?
-            raise CustomException(msg=f"Source package not found at {source_path}. Please ensure file exists in OSS.")
-
-        await OSSUtil.copy_file(redis, source_path, target_path)
-
-        # Create Package Record
-        # 注意：is_latest 不在模型中，需要单独处理
-        pkg_data = ServicePackageCreateSchema(
-            service_id=service.id,
-            version=timestamp_str + "00", # Use timestamp as version? Spec: "Version (auto generated... 2025112214300100)"
-            package_path=target_path,
-            md5=meta.get("etag")[:64],
-            size=meta.get("size"),
-            is_latest=True
-        )
         
-        # 创建数据字典，排除 is_latest 字段
-        create_data = pkg_data.model_dump(exclude={'is_latest'})
-        pkg = await ServicePackageCRUD(auth).create_obj_crud(data=create_data)
+        # 遍历每个服务模块
+        for service_id in data.service_ids:
+            try:
+                service = await ServiceCRUD(auth).get_obj_by_id_crud(service_id)
+                if not service:
+                    errors.append(f"服务模块 ID {service_id} 不存在")
+                    continue
+
+                # Source Path Logic
+                # Spec: package/2025-paas版本文件/2025${time}/${I}.tar
+                source_path = f"/package/{year_part}-paas版本文件/{year_part}{date_part}/{service.name}.tar"
+                # Remove leading slash if OSS SDK doesn't like it
+                if source_path.startswith("/"):
+                    source_path = source_path[1:]
+
+                # Target Path Logic
+                # Spec: {system}/{date}/{module_name}_{timestamp}_{uuid}.tgz
+                timestamp_str = now.strftime("%Y%m%d%H%M%S")
+                uuid_str = str(uuid.uuid4())[:8]
+                target_path = f"package/{system_name}/{target_date}/{service.name}_{timestamp_str}_{uuid_str}.tar"
+
+                # Check Source & Copy
+                try:
+                    meta = await OSSUtil.get_object_meta(redis, source_path)
+                except Exception as e:
+                    logger.error(f"Failed to find source package at {source_path}: {e}")
+                    errors.append(f"服务模块 {service.name} 的源文件不存在: {source_path}")
+                    continue
+
+                await OSSUtil.copy_file(redis, source_path, target_path)
+
+                # Create Package Record
+                # 注意：is_latest 不在模型中，需要单独处理
+                pkg_data = ServicePackageCreateSchema(
+                    service_id=service.id,
+                    version=timestamp_str, # Use timestamp as version? Spec: "Version (auto generated... 2025112214300100)"
+                    package_path=target_path,
+                    md5=meta.get("etag")[:64] if meta.get("etag") else None,
+                    size=meta.get("size"),
+                    is_latest=True
+                )
+                
+                # 创建数据字典，排除 is_latest 字段
+                create_data = pkg_data.model_dump(exclude={'is_latest'})
+                pkg = await ServicePackageCRUD(auth).create_obj_crud(data=create_data)
+                
+                # Update Service
+                await ServiceCRUD(auth).update_obj_crud(service.id, {"current_package_version": pkg.version})
+                
+                results.append(ServicePackageOutSchema.model_validate(pkg).model_dump())
+                logger.info(f"成功上传服务模块 {service.name} 的版本包: {pkg.version}")
+                
+            except Exception as e:
+                logger.error(f"处理服务模块 ID {service_id} 时出错: {e}")
+                errors.append(f"服务模块 ID {service_id} 处理失败: {str(e)}")
+                continue
         
-        # Update Service
-        await ServiceCRUD(auth).update_obj_crud(service.id, {"current_package_version": pkg.version})
+        # 如果有错误，抛出异常（但包含部分成功的结果）
+        if errors:
+            error_msg = f"部分服务模块上传失败:\n" + "\n".join(errors)
+            if results:
+                # 部分成功，记录警告但返回结果
+                logger.warning(error_msg)
+            else:
+                # 全部失败，抛出异常
+                raise CustomException(msg=error_msg)
         
-        return ServicePackageOutSchema.model_validate(pkg).model_dump()
+        return results
 
     @classmethod
     async def get_package_list_service(cls, auth: AuthSchema, search: ServicePackageQueryParam) -> list[Dict]:

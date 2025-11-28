@@ -1,0 +1,26 @@
+---
+# deploy_nginx.yml - Nginx service deployment playbook (reload only)
+- name: Deploy Nginx Service
+  hosts: "{{ target_hosts }}"
+  gather_facts: false
+  tasks:
+    - name: Create remote directory
+      file:
+        path: "{{ remote_pkg_path | dirname }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copy config file
+      copy:
+        src: "{{ local_pkg_path }}"
+        dest: "{{ remote_pkg_path }}"
+        mode: '0644'
+
+    - name: Validate Nginx config
+      shell: "nginx -t"
+      become: true
+
+    - name: Reload Nginx
+      shell: "nginx -s reload"
+      become: true
+

@@ -72,6 +72,10 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
                 return self._execute_deploy()
             if self.task_type == "restart":
                 return self._execute_restart()
+            if self.task_type == "start":
+                return self._execute_start()
+            if self.task_type == "stop":
+                return self._execute_stop()
             
             self.write_log(f"[ERROR] 未知任务类型: {self.task_type}")
             return 1
@@ -87,13 +91,15 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
     def _execute_deploy(self) -> int:
         """
         从 OSS 下载版本包并通过 Ansible Playbook 分发与执行。
+        根据 service_type 分组执行不同的 playbook。
         """
-        # Playbook 路径
-        playbook_path = Path(__file__).parent / "ansible_playbooks" / "deploy.yml"
         back_date = datetime.now().strftime("%m%d")
-        inventory_metas = []
         
-        # 1. 准备阶段：下载所有需要的文件，并构建带变量的元数据
+        # 1. 准备阶段：按模块类型 (service_type) 分组任务
+        # 结构: { "java": [meta1, meta2], "nginx": [meta3], "default": [meta4] }
+        grouped_metas: Dict[str, List[Dict[str, Any]]] = {}
+        
+        # 预处理并下载文件
         for meta in self.operator_metas:
             package_key = meta.get("package_path")
             if not package_key:
@@ -105,6 +111,21 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
                 remote_path = meta.get("remote_path") or f"/data/service/{meta.get('service_name')}"
                 restart_command = meta.get("restart_command") or f"supervisorctl restart {meta.get('service_name')}"
                 
+                # 获取模块类型，默认为 'default'
+                # 优先从 meta 中获取，也可以尝试根据 service_name 或其他字段推断
+                service_type = meta.get("module_group") or "default"
+                # 将 module_group 映射到 playbook 名称后缀
+                # 假设 module_group 值为 'java', 'nginx' 等。如果是中文或其他，需要映射
+                # 简单的归一化处理，实际可能需要查表
+                service_type_key = service_type.lower() if service_type else "default"
+                if "java" in service_type_key:
+                    service_type_key = "java"
+                elif "nginx" in service_type_key:
+                    service_type_key = "nginx"
+                else:
+                    # 报错
+                    raise ValueError(f"服务：{meta.get('service_name')} 模块分组：{service_type}, 请检查 module_group 字段")
+                
                 # 构造带 ansbile_vars 的 meta 副本
                 new_meta = meta.copy()
                 new_meta["ansible_vars"] = {
@@ -114,69 +135,107 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
                     "restart_command": restart_command,
                     "back_date": back_date,
                 }
-                inventory_metas.append(new_meta)
+                
+                if service_type_key not in grouped_metas:
+                    grouped_metas[service_type_key] = []
+                grouped_metas[service_type_key].append(new_meta)
                 
             except Exception as e:
                 self.write_log(f"[ERROR] 准备模块 {meta.get('service_name')} 失败: {e}")
-                continue
+                raise e
 
-        if not inventory_metas:
+        if not grouped_metas:
             self.write_log("[ERROR] 没有有效的部署任务可执行")
             return 1
 
-        # 2. 生成包含所有主机的 Inventory
-        inventory_path = self.generate_ansible_inventory(inventory_metas)
+        # 2. 分组执行 Playbook
+        final_rc = 0
+        for service_type, metas in grouped_metas.items():
+            # 确定 playbook 路径
+            # 命名规范: deploy_{service_type}.yml (e.g., deploy_java.yml, deploy_nginx.yml)
+            playbook_name = f"deploy_{service_type}.yml"
+            playbook_path = Path(__file__).parent / "ansible_playbooks" / playbook_name
+            
+            # 如果特定类型的 playbook 不存在，回退到 deploy_default.yml 或 deploy.yml
+            if not playbook_path.exists():
+                self.write_log(f"[WARNING] Playbook {playbook_name} 不存在，尝试使用 deploy_default.yml")
+                playbook_path = Path(__file__).parent / "ansible_playbooks" / "deploy_default.yml"
+                if not playbook_path.exists():
+                     self.write_log(f"[WARNING] deploy_default.yml 也不存在，尝试使用 deploy.yml")
+                     playbook_path = Path(__file__).parent / "ansible_playbooks" / "deploy.yml"
+
+            self.write_log(f"准备执行分组部署: 类型={service_type}, 模块数={len(metas)}, Playbook={playbook_path.name}")
+            
+            # 生成该组的 Inventory
+            inventory_path = self.generate_ansible_inventory(metas)
+            
+            # 执行 Playbook
+            self.write_log(f"执行 Playbook: {playbook_path} -> Hosts: all")
+            
+            rc = self.run_ansible_playbook(
+                playbook=playbook_path,
+                inventory=inventory_path,
+                extra_vars={"target_hosts": "all"}
+            )
+            
+            if rc != 0:
+                final_rc = rc
+                self.write_log(f"[ERROR] 分组 {service_type} 部署失败，返回码: {rc}")
+            else:
+                self.write_log(f"[SUCCESS] 分组 {service_type} 部署成功")
         
-        # 3. 批量执行 Playbook
-        self.write_log(f"批量执行部署 Playbook: {playbook_path} -> Hosts: all")
-        
-        # 变量已通过 inventory 的 [group:vars] 传递，这里只需要指定 target_hosts
-        # 注意：Playbook 中 hosts: "{{ target_hosts }}"，我们需要让它匹配所有组
-        # 可以传入 target_hosts="all" 或者特定的组列表。这里使用 "all" 简单直接。
-        
-        rc = self.run_ansible_playbook(
-            playbook=playbook_path,
-            inventory=inventory_path,
-            extra_vars={"target_hosts": "all"}
-        )
-        
-        return 0 if rc == 0 else 1
+        return final_rc
     
     def _execute_restart(self) -> int:
+        """重启"""
+        return self._execute_service_command(action="restart")
+
+    def _execute_start(self) -> int:
+        """启动"""
+        return self._execute_service_command(action="start")
+
+    def _execute_stop(self) -> int:
+        """停止"""
+        return self._execute_service_command(action="stop")
+
+    def _execute_service_command(self, action: str) -> int:
         """
-        使用 Ansible Playbook 执行重启指令。
+        通过 Ansible Playbook 执行服务控制指令（restart/start/stop）。
         """
-        playbook_path = Path(__file__).parent / "ansible_playbooks" / "restart.yml"
-        inventory_metas = []
-        
-        # 1. 准备变量
+        playbook_path = Path(__file__).parent / "ansible_playbooks" / f"{action}.yml"
+        inventory_metas: List[Dict[str, Any]] = []
+
         for meta in self.operator_metas:
-            restart_target = meta.get("restart_target") or meta.get("service_name") or f"service_{meta.get('service_id')}"
-            restart_command = meta.get("restart_command") or f"supervisorctl restart {restart_target}"
-            
+            service_name = meta.get("service_name")
+            restart_command = "supervisorctl restart {service_name}" if action == "restart" else None
+            start_command = "supervisorctl start {service_name}" if action == "start" else None
+            stop_command = "supervisorctl stop {service_name}" if action == "stop" else None
+
             new_meta = meta.copy()
             new_meta["ansible_vars"] = {
+                "service_name": service_name,
                 "restart_command": restart_command,
+                "start_command": start_command,
+                "stop_command": stop_command,
             }
             inventory_metas.append(new_meta)
-            
+
         if not inventory_metas:
-            self.write_log("[ERROR] 没有有效的重启任务可执行")
+            self.write_log(f"[ERROR] 没有有效的 {action} 任务可执行")
             return 1
-            
-        # 2. 生成 Inventory
+
         inventory_path = self.generate_ansible_inventory(inventory_metas)
-        
-        # 3. 批量执行
-        self.write_log(f"批量执行重启 Playbook: {playbook_path} -> Hosts: all")
-        time.sleep(10)
-        
+        self.write_log(f"批量执行{action} Playbook: {playbook_path} -> Hosts: all")
+
+        # restart 之前保留的延时逻辑，复用到所有操作，避免瞬时触发
+        time.sleep(2 if action in {"start", "stop"} else 10)
+
         rc = self.run_ansible_playbook(
             playbook=playbook_path,
             inventory=inventory_path,
             extra_vars={"target_hosts": "all"}
         )
-        
+
         return 0 if rc == 0 else 1
     
     def _resolve_group_name(self, meta: Dict[str, Any]) -> str:

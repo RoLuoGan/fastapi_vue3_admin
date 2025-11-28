@@ -59,12 +59,12 @@ async def delete(
     await ServicePackageService.delete_package_service(auth, ids)
     return SuccessResponse(msg="Deleted successfully")
 
-@router.post("/one-click-upload", summary="一键上传")
+@router.post("/one-click-upload", summary="一键上传（支持批量）")
 async def one_click_upload(
     data: OneClickUploadSchema,
     auth: AuthSchema = Depends(AuthPermission(["operations:package:create"])),
     redis: Redis = Depends(redis_getter)
 ) -> JSONResponse:
     result = await ServicePackageService.one_click_upload_service(auth, redis, data)
-    return SuccessResponse(data=result)
+    return SuccessResponse(data=result, msg=f"成功上传 {len(result)} 个服务模块的版本包")
 
