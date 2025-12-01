@@ -1,0 +1,9 @@
+---
+- name: Stop Service
+  hosts: "{{ target_hosts }}"
+  gather_facts: false
+  tasks:
+    - name: Stop service command
+      shell: "echo 'stop web service' {{ service_name }}"
+      become: true
+

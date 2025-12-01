@@ -107,21 +107,18 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
                 continue
             
             try:
-                local_pkg = self.download_oss_object(package_key)
-                remote_path = meta.get("remote_path") or f"/data/service/{meta.get('service_name')}"
-                restart_command = meta.get("restart_command") or f"supervisorctl restart {meta.get('service_name')}"
-                
+                local_pkg = self.download_oss_object(package_key)                
                 # 获取模块类型，默认为 'default'
                 # 优先从 meta 中获取，也可以尝试根据 service_name 或其他字段推断
                 service_type = meta.get("module_group") or "default"
                 # 将 module_group 映射到 playbook 名称后缀
-                # 假设 module_group 值为 'java', 'nginx' 等。如果是中文或其他，需要映射
+                # 假设 module_group 值为 'java', 'web' 等。如果是中文或其他，需要映射
                 # 简单的归一化处理，实际可能需要查表
                 service_type_key = service_type.lower() if service_type else "default"
                 if "java" in service_type_key:
                     service_type_key = "java"
-                elif "nginx" in service_type_key:
-                    service_type_key = "nginx"
+                elif "web" in service_type_key:
+                    service_type_key = "web"
                 else:
                     # 报错
                     raise ValueError(f"服务：{meta.get('service_name')} 模块分组：{service_type}, 请检查 module_group 字段")
@@ -131,8 +128,6 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
                 new_meta["ansible_vars"] = {
                     "service_name": meta.get("service_name"),
                     "local_pkg_path": str(local_pkg),
-                    "remote_pkg_path": remote_path,
-                    "restart_command": restart_command,
                     "back_date": back_date,
                 }
                 
@@ -152,17 +147,12 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
         final_rc = 0
         for service_type, metas in grouped_metas.items():
             # 确定 playbook 路径
-            # 命名规范: deploy_{service_type}.yml (e.g., deploy_java.yml, deploy_nginx.yml)
-            playbook_name = f"deploy_{service_type}.yml"
-            playbook_path = Path(__file__).parent / "ansible_playbooks" / playbook_name
+            # 命名规范: {service_type}/deploy.yml (e.g., java/deploy.yml, web/deploy.yml)
+            playbook_path = Path(__file__).parent / "ansible_playbooks" / service_type / "deploy.yml"
             
-            # 如果特定类型的 playbook 不存在，回退到 deploy_default.yml 或 deploy.yml
+            # 如果特定类型的 playbook 不存在，抛出错误
             if not playbook_path.exists():
-                self.write_log(f"[WARNING] Playbook {playbook_name} 不存在，尝试使用 deploy_default.yml")
-                playbook_path = Path(__file__).parent / "ansible_playbooks" / "deploy_default.yml"
-                if not playbook_path.exists():
-                     self.write_log(f"[WARNING] deploy_default.yml 也不存在，尝试使用 deploy.yml")
-                     playbook_path = Path(__file__).parent / "ansible_playbooks" / "deploy.yml"
+                raise ValueError(f"服务：{meta.get('service_name')} 模块分组：{service_type}, playbook 不存在: {playbook_path}")
 
             self.write_log(f"准备执行分组部署: 类型={service_type}, 模块数={len(metas)}, Playbook={playbook_path.name}")
             
@@ -201,42 +191,76 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
     def _execute_service_command(self, action: str) -> int:
         """
         通过 Ansible Playbook 执行服务控制指令（restart/start/stop）。
+        根据 service_type 分组执行不同的 playbook。
         """
-        playbook_path = Path(__file__).parent / "ansible_playbooks" / f"{action}.yml"
-        inventory_metas: List[Dict[str, Any]] = []
-
+        # 1. 准备阶段：按模块类型 (service_type) 分组任务
+        # 结构: { "java": [meta1, meta2], "web": [meta3], "default": [meta4] }
+        grouped_metas: Dict[str, List[Dict[str, Any]]] = {}
+        
+        # 预处理并构建分组
         for meta in self.operator_metas:
             service_name = meta.get("service_name")
-            restart_command = "supervisorctl restart {service_name}" if action == "restart" else None
-            start_command = "supervisorctl start {service_name}" if action == "start" else None
-            stop_command = "supervisorctl stop {service_name}" if action == "stop" else None
-
+            
+            # 获取模块类型，默认为 'default'
+            service_type = meta.get("module_group") or "default"
+            # 简单的归一化处理
+            service_type_key = service_type.lower() if service_type else "default"
+            if "java" in service_type_key:
+                service_type_key = "java"
+            elif "web" in service_type_key:
+                service_type_key = "web"
+            else:
+                # 报错
+                raise ValueError(f"服务：{service_name} 模块分组：{service_type}, 请检查 module_group 字段")
+            
             new_meta = meta.copy()
             new_meta["ansible_vars"] = {
-                "service_name": service_name,
-                "restart_command": restart_command,
-                "start_command": start_command,
-                "stop_command": stop_command,
+                "service_name": service_name
             }
-            inventory_metas.append(new_meta)
+            
+            if service_type_key not in grouped_metas:
+                grouped_metas[service_type_key] = []
+            grouped_metas[service_type_key].append(new_meta)
 
-        if not inventory_metas:
+        if not grouped_metas:
             self.write_log(f"[ERROR] 没有有效的 {action} 任务可执行")
             return 1
 
-        inventory_path = self.generate_ansible_inventory(inventory_metas)
-        self.write_log(f"批量执行{action} Playbook: {playbook_path} -> Hosts: all")
+        # 2. 分组执行 Playbook
+        final_rc = 0
+        for service_type, metas in grouped_metas.items():
+            # 确定 playbook 路径
+            # 命名规范: {service_type}/{action}.yml (e.g., java/restart.yml, web/start.yml)
+            playbook_path = Path(__file__).parent / "ansible_playbooks" / service_type / f"{action}.yml"
+            
+            # 如果特定类型的 playbook 不存在，抛出错误
+            if not playbook_path.exists():
+                raise ValueError(f"服务：{meta.get('service_name')} 模块分组：{service_type}, playbook 不存在: {playbook_path}")
 
-        # restart 之前保留的延时逻辑，复用到所有操作，避免瞬时触发
-        time.sleep(2 if action in {"start", "stop"} else 10)
-
-        rc = self.run_ansible_playbook(
-            playbook=playbook_path,
-            inventory=inventory_path,
-            extra_vars={"target_hosts": "all"}
-        )
-
-        return 0 if rc == 0 else 1
+            self.write_log(f"准备执行分组{action}: 类型={service_type}, 模块数={len(metas)}, Playbook={playbook_path.name}")
+            
+            # 生成该组的 Inventory
+            inventory_path = self.generate_ansible_inventory(metas)
+            
+            # 执行 Playbook
+            self.write_log(f"执行 Playbook: {playbook_path} -> Hosts: all")
+            
+            # restart 之前保留的延时逻辑，复用到所有操作，避免瞬时触发
+            time.sleep(2 if action in {"start", "stop"} else 10)
+            
+            rc = self.run_ansible_playbook(
+                playbook=playbook_path,
+                inventory=inventory_path,
+                extra_vars={"target_hosts": "all"}
+            )
+            
+            if rc != 0:
+                final_rc = rc
+                self.write_log(f"[ERROR] 分组 {service_type} {action} 失败，返回码: {rc}")
+            else:
+                self.write_log(f"[SUCCESS] 分组 {service_type} {action} 成功")
+        
+        return final_rc
     
     def _resolve_group_name(self, meta: Dict[str, Any]) -> str:
         name = meta.get("service_name") or f"service_{meta.get('service_id')}"

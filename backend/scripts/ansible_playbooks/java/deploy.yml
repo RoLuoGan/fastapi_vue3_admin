@@ -17,10 +17,10 @@
     - name: unarchive package to remote
       unarchive:
         src: "{{ local_pkg_path }}"
-        dest: "{{ remote_pkg_path }}"
+        dest: "/data/service/{{ service_name }}"
       become: true
       
     - name: Execute restart command
-      shell: "{{ restart_command }}"
+      shell: "supervisorctl restart {{ service_name }}"
       become: true
 

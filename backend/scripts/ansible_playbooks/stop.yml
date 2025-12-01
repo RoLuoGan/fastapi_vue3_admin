@@ -1,9 +1,0 @@
----
-- name: Restart Service
-  hosts: "{{ target_hosts }}"
-  gather_facts: false
-  tasks:
-    - name: Restart service command
-      shell: "{{ restart_command }}"
-      become: true
-

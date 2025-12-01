@@ -1,0 +1,27 @@
+---
+# deploy_web.yml - Web service deployment playbook
+- name: Deploy Web Service
+  hosts: "{{ target_hosts }}"
+  gather_facts: false
+  tasks:
+    - name: Create remote directory
+      file:
+        path: "/data/service/{{ service_name }}"
+        state: directory
+      become: true
+
+    - name: unarchive package to remote
+      unarchive:
+        src: "{{ local_pkg_path }}"
+        dest: "/data/service/{{ service_name }}"
+      become: true
+
+    - name: Validate config
+      shell: "nginx -t"
+      become: true
+      ignore_errors: true
+
+    - name: Reload service
+      shell: "nginx -s reload"
+      become: true
+

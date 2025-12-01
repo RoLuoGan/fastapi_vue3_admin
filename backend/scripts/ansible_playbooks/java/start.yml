@@ -1,0 +1,9 @@
+---
+- name: Start Service
+  hosts: "{{ target_hosts }}"
+  gather_facts: false
+  tasks:
+    - name: Start service command
+      shell: "supervisorctl start {{ service_name }}"
+      become: true
+
