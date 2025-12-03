@@ -208,14 +208,6 @@ class TaskService:
         # 注意: 这里使用 asyncio.create_task 将任务放入后台执行
         # API 会立即返回任务 ID，前端可以通过轮询或 SSE 流式获取日志
         
-        # 计算节点数量 (直接从元数据计算，不查询 DB)
-        node_count = 0
-        for meta in operator_metas:
-            if "nodes" in meta and isinstance(meta["nodes"], list):
-                node_count += len(meta["nodes"])
-            elif "node_ids" in meta and isinstance(meta["node_ids"], list):
-                node_count += len(meta["node_ids"])
-
         # 创建任务记录（直接透传所有参数）
         task_record = await cls._create_task(
             auth=auth,
@@ -243,7 +235,6 @@ class TaskService:
         return {
             "message": "任务已启动",
             "task_id": task.id,
-            "node_count": node_count,
             "task_type": task_type,
             "operator_type": operator_type,
         }

@@ -79,11 +79,15 @@ class TaskCRUD(CRUDBase[TaskModel, Dict, Dict]):
             import json
             filtered_items = []
             for item in result.get("items", []):
-                # 解析 params JSON
-                params = item.params if isinstance(item.params, dict) else {}
-                if isinstance(item.params, str):
+                # 解析 params JSON (item 已经是字典，不是 ORM 对象)
+                item_params = item.get("params") if isinstance(item, dict) else getattr(item, "params", None)
+                params = {}
+                
+                if isinstance(item_params, dict):
+                    params = item_params
+                elif isinstance(item_params, str):
                     try:
-                        params = json.loads(item.params)
+                        params = json.loads(item_params)
                     except:
                         params = {}
                 

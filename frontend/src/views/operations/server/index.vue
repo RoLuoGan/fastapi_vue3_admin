@@ -22,7 +22,7 @@
           <el-input v-model="queryFormData.ip" placeholder="请输入节点IP" clearable />
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="queryFormData.status" placeholder="全部" clearable>
+          <el-select v-model="queryFormData.status" placeholder="全部" clearable style="width: 150px">
             <el-option :value="true" label="启用" />
             <el-option :value="false" label="停用" />
           </el-select>

@@ -17,20 +17,20 @@
       </template>
       <el-form ref="queryFormRef" :model="queryFormData" inline label-width="90px" label-suffix=":">
         <el-form-item label="任务类型">
-          <el-select v-model="queryFormData.task_type" placeholder="全部" clearable>
+          <el-select v-model="queryFormData.task_type" placeholder="全部" clearable style="width: 180px">
             <el-option label="节点操作" value="node_operator" />
             <el-option label="服务器操作" value="server_operator" />
           </el-select>
         </el-form-item>
         <el-form-item label="操作类型">
-          <el-select v-model="queryFormData.operator_type" placeholder="全部" clearable>
+          <el-select v-model="queryFormData.operator_type" placeholder="全部" clearable style="width: 150px">
             <el-option label="部署" value="deploy" />
             <el-option label="重启" value="restart" />
             <el-option label="初始化" value="init" />
           </el-select>
         </el-form-item>
         <el-form-item label="任务状态">
-          <el-select v-model="queryFormData.task_status" placeholder="全部" clearable>
+          <el-select v-model="queryFormData.task_status" placeholder="全部" clearable style="width: 150px">
             <el-option label="执行中" value="running" />
             <el-option label="成功" value="success" />
             <el-option label="部分成功" value="partial_success" />

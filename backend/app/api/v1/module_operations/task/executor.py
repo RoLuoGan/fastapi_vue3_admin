@@ -123,54 +123,6 @@ class TaskExecutor:
             logger.warning(f"[Executor] Redis 未提供，跳过 Redis Stream 写入 task_id={task_id}, seq={seq}")
 
     @classmethod
-    def _build_operator_metas_for_script(cls, operator_metas: List[dict]) -> List[Dict]:
-        """
-        构建传递给脚本的 operator_metas 格式
-        
-        Args:
-            operator_metas: 操作元数据列表，格式: [{"service_id": 1, "nodes": [node_obj, ...]}, ...]
-        
-        Returns:
-            List[Dict]: 格式化的操作元数据列表
-        """
-        result = []
-        for meta in operator_metas:
-            service_id = meta.get("service_id")
-            service_nodes = meta.get("nodes", [])
-            
-            # 获取服务名称
-            service_name = None
-            if service_nodes:
-                first_node = service_nodes[0]
-                if hasattr(first_node, 'services'):
-                    for svc in (first_node.services or []):
-                        if svc.id == service_id:
-                            service_name = svc.name
-                            break
-                if not service_name and hasattr(first_node, 'service'):
-                    if first_node.service and first_node.service.id == service_id:
-                        service_name = first_node.service.name
-            
-            # 构建节点列表
-            node_list = []
-            for node in service_nodes:
-                node_dict = {
-                    "id": node.id,
-                    "ip": node.ip,
-                    "port": node.port or 22,
-                    "service_id": service_id,
-                }
-                node_list.append(node_dict)
-            
-            result.append({
-                "service_id": service_id,
-                "service_name": service_name,
-                "nodes": node_list,
-            })
-        
-        return result
-
-    @classmethod
     async def execute_batch_task(
         cls,
         *,

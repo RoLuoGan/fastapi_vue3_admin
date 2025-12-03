@@ -55,7 +55,7 @@ async def execute_task_controller(
         redis=redis,
     )
     
-    logger.info(f"任务已启动: task_id={result.get('task_id')}, 节点数={result.get('node_count')}")
+    logger.info(f"任务已启动: task_id={result.get('task_id')}")
     return SuccessResponse(data=result, msg=result.get("message", "任务已启动"))
 
 
