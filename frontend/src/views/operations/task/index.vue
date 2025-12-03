@@ -35,6 +35,8 @@
             <el-option label="成功" value="success" />
             <el-option label="部分成功" value="partial_success" />
             <el-option label="失败" value="failed" />
+            <el-option label="取消中" value="cancelling" />
+            <el-option label="已取消" value="cancelled" />
           </el-select>
         </el-form-item>
         <el-form-item label="运维管理项目">
@@ -318,6 +320,10 @@ function statusLabel(status?: string) {
       return "部分成功";
     case "failed":
       return "失败";
+    case "cancelling":
+      return "取消中";
+    case "cancelled":
+      return "已取消";
     default:
       return status || "-";
   }
@@ -333,6 +339,10 @@ function statusTag(status?: string) {
       return "warning";
     case "failed":
       return "danger";
+    case "cancelling":
+      return "warning";
+    case "cancelled":
+      return "info";
     default:
       return "info";
   }

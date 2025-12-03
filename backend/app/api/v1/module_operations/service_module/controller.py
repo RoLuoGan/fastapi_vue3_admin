@@ -23,7 +23,7 @@ router = APIRouter(route_class=OperationLogRoute, prefix="/node/service", tags=[
 @router.get("/tree", summary="查询服务模块树", description="查询服务模块树（包含节点）")
 async def get_service_tree_controller(
     search: ServiceQueryParam = Depends(),
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"], check_data_scope=False)),
 ) -> JSONResponse:
     order_by = [{"created_at": "desc"}]
     result = await ServiceService.get_service_tree_service(
@@ -39,7 +39,7 @@ async def get_service_tree_controller(
 async def get_service_page_controller(
     page: PaginationQueryParam = Depends(),
     search: ServiceQueryParam = Depends(),
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"], check_data_scope=False)),
 ) -> JSONResponse:
     result = await ServiceService.get_service_page_service(
         auth=auth,
@@ -55,7 +55,7 @@ async def get_service_page_controller(
 @router.get("/detail/{id}", summary="查询服务模块详情", description="查询服务模块详情")
 async def get_service_detail_controller(
     id: int = Path(..., description="服务模块ID"),
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"], check_data_scope=False)),
 ) -> JSONResponse:
     result = await ServiceService.get_service_detail_service(id=id, auth=auth)
     logger.info(f"查询服务模块详情成功 {id}")

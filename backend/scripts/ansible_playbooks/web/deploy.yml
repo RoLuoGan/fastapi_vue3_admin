@@ -4,24 +4,18 @@
   hosts: "{{ target_hosts }}"
   gather_facts: false
   tasks:
-    - name: Create remote directory
+    - name: Create remote bak directory /data/service/bak/{{ back_date }}
       file:
-        path: "/data/service/{{ service_name }}"
+        path: "/data/service/bak/{{ back_date }"
         state: directory
+      become: true
+
+    - name: mv old {{ service_name }} to bak/{{ back_date }}
+      shell: mv /data/service/web/{{ service_name }} /data/service/bak/{{ back_date }}/{{ service_name }}_{{ back_date }}
       become: true
 
     - name: unarchive package to remote
       unarchive:
         src: "{{ local_pkg_path }}"
-        dest: "/data/service/{{ service_name }}"
+        dest: "/data/service/web/}"
       become: true
-
-    - name: Validate config
-      shell: "nginx -t"
-      become: true
-      ignore_errors: true
-
-    - name: Reload service
-      shell: "nginx -s reload"
-      become: true
-

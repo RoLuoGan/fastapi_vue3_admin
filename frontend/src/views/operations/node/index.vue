@@ -176,6 +176,8 @@
                   <el-icon v-if="task.task_status === 'success'" class="status-icon success"><CircleCheck /></el-icon>
                   <el-icon v-else-if="task.task_status === 'partial_success'" class="status-icon partial"><WarningFilled /></el-icon>
                   <el-icon v-else-if="task.task_status === 'failed'" class="status-icon failed"><CircleClose /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'cancelled'" class="status-icon cancelled"><Close /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'cancelling'" class="status-icon cancelling"><Loading /></el-icon>
                   <el-icon v-else class="status-icon running"><Loading /></el-icon>
                   <span class="status-text">{{ getTaskStatusText(task.task_status || 'running') }}</span>
                 </div>
@@ -226,7 +228,7 @@ defineOptions({
 import NodeAPI, { ServiceTable, TaskTable, ServiceQueryParam } from "@/api/operations/node";
 import ServicePackageAPI from "@/api/operations/service_package";
 import { useRouter } from "vue-router";
-import { QuestionFilled, CircleCheck, CircleClose, Loading, WarningFilled, ArrowDown, ArrowUp, VideoPlay, VideoPause } from "@element-plus/icons-vue";
+import { QuestionFilled, CircleCheck, CircleClose, Loading, WarningFilled, ArrowDown, ArrowUp, VideoPlay, VideoPause, Close } from "@element-plus/icons-vue";
 import DictAPI from "@/api/system/dict";
 import { onBeforeUnmount } from "vue";
 
@@ -1028,6 +1030,8 @@ function getTaskStatusText(status: string) {
     success: '完成',
     partial_success: '部分成功',
     failed: '失败',
+    cancelling: '取消中',
+    cancelled: '已取消',
   };
   return statusMap[status] || status;
 }
@@ -1060,6 +1064,8 @@ function progressStatus(status?: string) {
   if (status === 'success') return 'success';
   if (status === 'partial_success') return 'warning';
   if (status === 'failed') return 'exception';
+  if (status === 'cancelled') return undefined; // 取消状态不显示特殊进度条颜色
+  if (status === 'cancelling') return 'warning'; // 取消中显示警告色
   return undefined;
 }
 
@@ -1186,6 +1192,15 @@ onBeforeUnmount(() => {
   &.running {
     color: #909399;
     animation: rotate 1s linear infinite;
+  }
+  
+  &.cancelling {
+    color: #e6a23c;
+    animation: rotate 1s linear infinite;
+  }
+  
+  &.cancelled {
+    color: #909399;
   }
 }
 

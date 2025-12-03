@@ -16,7 +16,7 @@ router = APIRouter(route_class=OperationLogRoute, prefix="/service-package", tag
 @router.get("/list", summary="查询服务软件包列表")
 async def get_list(
     search: ServicePackageQueryParam = Depends(),
-    auth: AuthSchema = Depends(AuthPermission(["operations:package:query"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:package:query"], check_data_scope=False)),
 ) -> JSONResponse:
     data = await ServicePackageService.get_package_list_service(auth, search)
     return SuccessResponse(data=data)

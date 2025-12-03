@@ -24,7 +24,7 @@ router = APIRouter(route_class=OperationLogRoute, prefix="/node", tags=["服务�
 async def get_server_page_controller(
     page: PaginationQueryParam = Depends(),
     search: ServerQueryParam = Depends(),
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"], check_data_scope=False)),
 ) -> JSONResponse:
     result = await ServerService.get_server_page_service(
         auth=auth,
@@ -40,7 +40,7 @@ async def get_server_page_controller(
 @router.get("/node/detail/{id}", summary="查询节点详情", description="查询节点详情")
 async def get_server_detail_controller(
     id: int = Path(..., description="节点ID"),
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"], check_data_scope=False)),
 ) -> JSONResponse:
     result = await ServerService.get_server_detail_service(id=id, auth=auth)
     logger.info(f"查询节点详情成功 {id}")

@@ -63,7 +63,7 @@ async def execute_task_controller(
 async def get_recent_tasks_controller(
     limit: int = Query(20, description="返回数量"),
     task_type: Optional[str] = Query(None, description="任务类型过滤（如：deploy、restart、init）"),
-    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:node:query"], check_data_scope=False)),
 ) -> JSONResponse:
     result = await TaskService.get_recent_tasks_service(limit=limit, task_type=task_type, auth=auth)
     logger.info("查询最近任务成功")
@@ -74,7 +74,7 @@ async def get_recent_tasks_controller(
 async def get_task_page_controller(
     page: PaginationQueryParam = Depends(),
     search: TaskQueryParam = Depends(),
-    auth: AuthSchema = Depends(AuthPermission(["operations:task:query"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:task:query"], check_data_scope=False)),
 ) -> JSONResponse:
     result = await TaskService.get_task_page_service(
         auth=auth,
@@ -90,7 +90,7 @@ async def get_task_page_controller(
 @router.get("/task/detail/{id}", summary="查询任务详情", description="查询任务详情")
 async def get_task_detail_controller(
     id: int = Path(..., description="任务ID"),
-    auth: AuthSchema = Depends(AuthPermission(["operations:task:query"])),
+    auth: AuthSchema = Depends(AuthPermission(["operations:task:query"], check_data_scope=False)),
 ) -> JSONResponse:
     result = await TaskService.get_task_detail_service(auth=auth, task_id=id)
     logger.info(f"查询任务详情成功 {id}")
@@ -115,6 +115,17 @@ async def delete_task_controller(
     await TaskService.delete_task_service(auth=auth, ids=ids)
     logger.info(f"删除任务成功 {ids}")
     return SuccessResponse(msg="删除任务成功")
+
+
+@router.post("/task/cancel/{id}", summary="取消任务", description="取消正在执行的任务")
+async def cancel_task_controller(
+    id: int = Path(..., description="任务ID"),
+    redis: Redis = Depends(redis_getter),
+    auth: AuthSchema = Depends(AuthPermission(["operations:task:cancel"])),
+) -> JSONResponse:
+    result = await TaskService.cancel_task_service(auth=auth, task_id=id, redis=redis)
+    logger.info(f"取消任务请求已提交: task_id={id}")
+    return SuccessResponse(data=result, msg=result.get("message", "取消任务请求已提交"))
 
 
 @router.get("/task/{task_id}/stream", summary="任务日志流", description="任务日志SSE流（支持分布式）")

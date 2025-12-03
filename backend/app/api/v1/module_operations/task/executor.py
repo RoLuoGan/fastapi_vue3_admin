@@ -24,6 +24,7 @@ from app.api.v1.module_system.auth.schema import AuthSchema
 from .crud import TaskCRUD
 from .log_crud import TaskLogCRUD
 from .redis_stream import TaskLogRedisStream
+from .schema import TaskStatus
 
 
 class TaskExecutor:
@@ -157,6 +158,27 @@ class TaskExecutor:
             # 初始化 seq 计数器（从 MySQL 获取最大 seq）
             current_seq = await new_log_crud.get_max_seq_crud(task_id=task_id)
             seq_lock = asyncio.Lock()
+            
+            # 取消标志检查
+            cancelled_event = asyncio.Event()
+            
+            async def check_cancelled():
+                """定期检查取消标志"""
+                while True:
+                    try:
+                        if redis:
+                            cancelled = await redis.get(f"task_cancelled:{task_id}")
+                            if cancelled:
+                                logger.info(f"[Executor] 检测到任务取消标志: task_id={task_id}")
+                                cancelled_event.set()
+                                break
+                        await asyncio.sleep(1)  # 每秒检查一次
+                    except Exception as e:
+                        logger.error(f"[Executor] 检查取消标志失败: {e}")
+                        await asyncio.sleep(1)
+            
+            # 启动取消检查任务
+            cancel_check_task = asyncio.create_task(check_cancelled())
             
             # 日志缓冲区（用于分段归档）
             log_buffer: List[str] = []
@@ -306,6 +328,15 @@ class TaskExecutor:
                 log_task = asyncio.create_task(log_consumer())
                 progress_task = asyncio.create_task(progress_consumer())
                 
+                # 检查是否已被取消
+                if cancelled_event.is_set():
+                    logger.info(f"[Executor] 任务在启动前已被取消: task_id={task_id}")
+                    cancel_check_task.cancel()
+                    await log_queue.put(None)
+                    await progress_queue.put(None)
+                    await asyncio.gather(log_task, progress_task, return_exceptions=True)
+                    raise asyncio.CancelledError("任务已被取消")
+                
                 def run_module():
                     return module.execute_in_process(
                         log_path=log_path,
@@ -316,20 +347,49 @@ class TaskExecutor:
                         progress_handler=progress_handler,
                     )
                 
+                # 创建脚本执行任务，支持取消
+                script_task = None
                 try:
-                    return_code = await asyncio.to_thread(run_module)
+                    script_task = asyncio.create_task(asyncio.to_thread(run_module))
+                    
+                    # 等待脚本执行完成或取消事件
+                    done, pending = await asyncio.wait(
+                        [script_task, asyncio.create_task(cancelled_event.wait())],
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    
+                    # 如果检测到取消，取消脚本任务
+                    if cancelled_event.is_set():
+                        logger.info(f"[Executor] 检测到取消标志，正在取消任务: task_id={task_id}")
+                        if script_task and not script_task.done():
+                            script_task.cancel()
+                            try:
+                                await script_task
+                            except asyncio.CancelledError:
+                                pass
+                        raise asyncio.CancelledError("任务已被取消")
+                    
+                    # 获取脚本执行结果
+                    return_code = await script_task
                 finally:
+                    # 取消取消检查任务
+                    cancel_check_task.cancel()
+                    try:
+                        await cancel_check_task
+                    except asyncio.CancelledError:
+                        pass
+                    
                     await log_queue.put(None)
                     await progress_queue.put(None)
-                    await asyncio.gather(log_task, progress_task)
+                    await asyncio.gather(log_task, progress_task, return_exceptions=True)
                 
                 # 根据返回码确定任务状态
                 if return_code == 0:
-                    final_status = "success"
+                    final_status = TaskStatus.SUCCESS
                     error_message = None
                 else:
                     # 检查是否有部分成功的情况（需要脚本输出特定格式）
-                    final_status = "failed"
+                    final_status = TaskStatus.FAILED
                     error_message = f"脚本执行失败，返回码: {return_code}"
                 
                 # 刷新剩余的日志缓冲区
@@ -362,7 +422,7 @@ class TaskExecutor:
                 logger.info(f"批次任务执行完成: task_id={task_id}, return_code={return_code}, status={final_status}")
                 
             except asyncio.CancelledError:
-                await cls.write_log(log_path, "批次任务被取消")
+                await cls.write_log(log_path, "[CANCELLED] 批次任务被取消")
                 await flush_log_buffer()  # 刷新缓冲区
                 
                 # 使用独立的数据库会话更新任务状态
@@ -373,15 +433,24 @@ class TaskExecutor:
                         await cancel_task_crud.update(
                             id=task_id,
                             data={
-                                "task_status": "failed",
-                                "error_message": "任务被取消",
+                                "task_status": TaskStatus.CANCELLED,
+                                "error_message": "任务已被取消",
                                 "progress": 100,
                             },
                         )
                         await cancel_db.commit()
+                        logger.info(f"[Executor] 任务取消状态已更新: task_id={task_id}")
                     except Exception as e:
                         await cancel_db.rollback()
                         logger.error(f"更新任务取消状态失败: {e}")
+                
+                # 清理 Redis 取消标志
+                if redis:
+                    try:
+                        await redis.delete(f"task_cancelled:{task_id}")
+                    except Exception as e:
+                        logger.warning(f"清理 Redis 取消标志失败: {e}")
+                
                 raise
             except Exception as exc:
                 error_msg = f"批次任务执行异常: {exc}"
@@ -400,7 +469,7 @@ class TaskExecutor:
                         await error_task_crud.update(
                             id=task_id,
                             data={
-                                "task_status": "failed",
+                                "task_status": TaskStatus.FAILED,
                                 "error_message": str(exc),
                                 "progress": 100,
                             },

@@ -21,7 +21,7 @@ from ..service_module.crud import ServiceCRUD
 from ..server.crud import ServerCRUD  # noqa: F401
 # from ..server.crud import ServerCRUD
 from .crud import TaskCRUD
-from .schema import TaskOutSchema, TaskDetailSchema, TaskLogSchema
+from .schema import TaskOutSchema, TaskDetailSchema, TaskLogSchema, TaskStatus, TaskType, OperatorType
 from .executor import TaskExecutor
 from .streamer import TaskLogStreamer
 
@@ -87,7 +87,7 @@ class TaskService:
         # 准备任务数据
         task_data = {
             "task_type": operator_type,  # 使用 operator_type 作为 task_type 存储
-            "task_status": "running",
+            "task_status": TaskStatus.RUNNING,
             "progress": 0,
             "log_path": str(log_path),
             "params": json.dumps(params_dict, ensure_ascii=False),
@@ -164,7 +164,7 @@ class TaskService:
             task = await TaskCRUD(auth).get_by_id_crud(id=task_id)
             if not task:
                 raise CustomException(msg=f"任务 {task_id} 不存在")
-            if task.task_status == "running":
+            if task.task_status == TaskStatus.RUNNING:
                 raise CustomException(msg=f"任务 {task_id} 正在执行，无法删除")
             tasks_to_delete.append(task)
 
@@ -237,6 +237,57 @@ class TaskService:
             "task_id": task.id,
             "task_type": task_type,
             "operator_type": operator_type,
+        }
+
+    @classmethod
+    async def cancel_task_service(cls, auth: AuthSchema, task_id: int, redis: Optional[Redis] = None) -> Dict:
+        """
+        取消任务 - 设置取消标志，由执行器检测并取消
+        
+        参数:
+        - auth: 认证信息
+        - task_id: 任务ID
+        - redis: Redis 连接（可选）
+        
+        返回:
+        - Dict: 包含操作结果的字典
+        """
+        # 检查任务是否存在
+        task = await TaskCRUD(auth).get_by_id_crud(id=task_id)
+        if not task:
+            raise CustomException(msg="任务不存在")
+        
+        # 检查任务状态
+        if task.task_status != TaskStatus.RUNNING:
+            raise CustomException(msg=f"任务状态为 {task.task_status}，无法取消")
+        
+        # 设置 Redis 取消标志（如果提供了 Redis）
+        if redis:
+            try:
+                await redis.set(f"task_cancelled:{task_id}", "1", ex=3600)
+                logger.info(f"已设置任务取消标志: task_id={task_id}")
+            except Exception as e:
+                logger.error(f"设置任务取消标志失败: {e}")
+        
+        # 更新任务状态为 cancelling（中间状态）
+        try:
+            await TaskCRUD(auth).update(
+                id=task_id,
+                data={
+                    "task_status": TaskStatus.CANCELLING,
+                    "error_message": "任务取消请求已提交",
+                }
+            )
+            await auth.db.commit()
+            logger.info(f"任务取消请求已提交: task_id={task_id}")
+        except Exception as e:
+            await auth.db.rollback()
+            logger.error(f"更新任务状态失败: {e}")
+            raise CustomException(msg=f"更新任务状态失败: {str(e)}")
+        
+        return {
+            "message": "取消任务请求已提交",
+            "task_id": task_id,
         }
 
     @classmethod

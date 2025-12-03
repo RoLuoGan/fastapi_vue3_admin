@@ -130,6 +130,13 @@ const NodeAPI = {
     });
   },
 
+  cancelTask(id: number) {
+    return request<ApiResponse>({
+      url: `${API_PATH}/task/cancel/${id}`,
+      method: "post",
+    });
+  },
+
   // 统一的任务执行接口（新格式：支持多模块多节点）
   executeTask(data: ExecuteTaskRequest) {
     console.log('========== NodeAPI.executeTask ==========');

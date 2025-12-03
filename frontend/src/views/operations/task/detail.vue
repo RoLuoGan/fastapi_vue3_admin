@@ -20,6 +20,16 @@
               构建参数查看
             </el-button>
             <el-button
+              type="warning"
+              plain
+              icon="Close"
+              @click="handleCancel"
+              :disabled="!isTaskRunning()"
+              v-hasPerm="['operations:task:cancel']"
+            >
+              取消任务
+            </el-button>
+            <el-button
               type="danger"
               icon="Delete"
               @click="handleDelete"
@@ -184,6 +194,10 @@ function statusLabel(status?: string) {
       return "部分成功";
     case "failed":
       return "失败";
+    case "cancelled":
+      return "已取消";
+    case "cancelling":
+      return "取消中";
     default:
       return status || "-";
   }
@@ -199,6 +213,10 @@ function statusTag(status?: string) {
       return "warning";
     case "failed":
       return "danger";
+    case "cancelled":
+      return "info";
+    case "cancelling":
+      return "warning";
     default:
       return "info";
   }
@@ -309,7 +327,7 @@ function handleSSEEvent(event: MessageEvent, defaultType: LogEntry["type"] = "lo
       if (payload.taskStatus) {
         taskDetail.value.task_status = payload.taskStatus;
         // 如果任务已结束，关闭SSE连接并停止定时刷新
-        if (["success", "partial_success", "failed"].includes(payload.taskStatus)) {
+        if (["success", "partial_success", "failed", "cancelled"].includes(payload.taskStatus)) {
           stopLogStream();
           stopTaskDetailRefresh();
           streamStatusLabel.value = "任务已结束";
@@ -434,8 +452,8 @@ function startLogStream() {
     return;
   }
   
-  // 检查任务状态，如果已结束则不启动SSE连接
-  if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
+    // 检查任务状态，如果已结束则不启动SSE连接
+    if (taskDetail.value?.task_status && ["success", "partial_success", "failed", "cancelled"].includes(taskDetail.value.task_status)) {
     isTaskFinished.value = true;
     streamStatusLabel.value = "任务已结束";
     if (logLines.value.length === 0 || logLines.value.every(entry => entry.type === "system")) {
@@ -467,7 +485,7 @@ function startLogStream() {
     streamStatusLabel.value = "已连接";
     
     // 连接建立后再次检查任务状态
-    if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
+    if (taskDetail.value?.task_status && ["success", "partial_success", "failed", "cancelled"].includes(taskDetail.value.task_status)) {
       console.log("[SSE] 连接建立后发现任务已结束，关闭连接");
       isTaskFinished.value = true;
       stopLogStream();
@@ -598,7 +616,7 @@ function startLogStream() {
       return;
     }
     
-    if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
+    if (taskDetail.value?.task_status && ["success", "partial_success", "failed", "cancelled"].includes(taskDetail.value.task_status)) {
       isTaskFinished.value = true;
       stopLogStream();
       streamStatusLabel.value = "任务已结束";
@@ -607,7 +625,7 @@ function startLogStream() {
     
     if (source.readyState === EventSource.CLOSED) {
       console.log("[SSE] 连接已关闭");
-      if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
+      if (taskDetail.value?.task_status && ["success", "partial_success", "failed", "cancelled"].includes(taskDetail.value.task_status)) {
         isTaskFinished.value = true;
         streamStatusLabel.value = "任务已结束";
         stopLogStream();
@@ -650,7 +668,7 @@ async function fetchTaskDetail() {
     
     const currentStatus = taskDetail.value?.task_status;
     const isRunning = currentStatus === "running";
-    const isFinished = currentStatus && ["success", "partial_success", "failed"].includes(currentStatus);
+    const isFinished = currentStatus && ["success", "partial_success", "failed", "cancelled"].includes(currentStatus);
     
     if (isFinished) {
       isTaskFinished.value = true;
@@ -734,7 +752,7 @@ async function loadCompleteLogs() {
 // ==================== 用户操作 ====================
 
 function restartStream() {
-  if (taskDetail.value?.task_status && ["success", "partial_success", "failed"].includes(taskDetail.value.task_status)) {
+  if (taskDetail.value?.task_status && ["success", "partial_success", "failed", "cancelled"].includes(taskDetail.value.task_status)) {
     ElMessage.warning("任务已结束，无法重连");
     return;
   }
@@ -748,6 +766,28 @@ function handleBack() {
 
 function toggleParamDrawer() {
   paramDrawerVisible.value = true;
+}
+
+async function handleCancel() {
+  if (!taskId.value) return;
+  if (!isTaskRunning()) {
+    ElMessage.warning("任务未在运行中，无法取消");
+    return;
+  }
+  try {
+    await ElMessageBox.confirm("确认取消该任务吗？取消后任务将停止执行。", "提示", {
+      type: "warning",
+    });
+    await NodeAPI.cancelTask(taskId.value);
+    ElMessage.success("取消任务请求已提交");
+    // 刷新任务详情
+    await fetchTaskDetail();
+  } catch (error: any) {
+    if (error !== "cancel") {
+      console.error(error);
+      ElMessage.error(error?.response?.data?.msg || "取消任务失败");
+    }
+  }
 }
 
 async function handleDelete() {

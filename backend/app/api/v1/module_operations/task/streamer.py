@@ -24,6 +24,7 @@ from app.api.v1.module_system.auth.schema import AuthSchema
 from .crud import TaskCRUD
 from .log_crud import TaskLogCRUD
 from .redis_stream import TaskLogRedisStream
+from .schema import TaskStatus
 
 
 class TaskLogStreamer:
@@ -309,7 +310,7 @@ class TaskLogStreamer:
                                 new_auth = AuthSchema(db=new_db, user=auth.user, check_data_scope=False)
                                 fresh_task = await TaskCRUD(new_auth).get_by_id_crud(id=task_id)
                             
-                            if fresh_task and fresh_task.task_status in ("success", "failed", "partial_success"):
+                            if fresh_task and TaskStatus.is_finished(fresh_task.task_status):
                                 task_finished = True
                                 return True
                         except Exception as e:
@@ -366,7 +367,7 @@ class TaskLogStreamer:
                                 new_auth = AuthSchema(db=new_db, user=auth.user, check_data_scope=False)
                                 fresh_task = await TaskCRUD(new_auth).get_by_id_crud(id=task_id)
                             
-                            if fresh_task and fresh_task.task_status in ("success", "failed", "partial_success"):
+                            if fresh_task and TaskStatus.is_finished(fresh_task.task_status):
                                 logger.info(f"[SSE] 检测到任务已完成 task_id={task_id}, status={fresh_task.task_status}")
                                 task_finished = True
                                 
@@ -386,7 +387,7 @@ class TaskLogStreamer:
                                 await asyncio.sleep(0)
                                 
                                 # 发送结束事件
-                                status_text = "完成" if fresh_task.task_status == "success" else "失败"
+                                status_text = "完成" if fresh_task.task_status == TaskStatus.SUCCESS else "失败"
                                 event_str = cls.format_sse_event(
                                     "task_end",
                                     {
@@ -427,7 +428,7 @@ class TaskLogStreamer:
                             await asyncio.sleep(0)
                             
                             # 发送结束事件
-                            status_text = "完成" if fresh_task.task_status == "success" else "失败"
+                            status_text = "完成" if fresh_task.task_status == TaskStatus.SUCCESS else "失败"
                             event_str = cls.format_sse_event(
                                 "task_end",
                                 {

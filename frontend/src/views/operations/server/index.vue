@@ -308,6 +308,8 @@
                   <el-icon v-if="task.task_status === 'success'" class="status-icon success"><CircleCheck /></el-icon>
                   <el-icon v-else-if="task.task_status === 'partial_success'" class="status-icon partial"><WarningFilled /></el-icon>
                   <el-icon v-else-if="task.task_status === 'failed'" class="status-icon failed"><CircleClose /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'cancelled'" class="status-icon cancelled"><Close /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'cancelling'" class="status-icon cancelling"><Loading /></el-icon>
                   <el-icon v-else class="status-icon running"><Loading /></el-icon>
                   <span class="status-text">{{ getTaskStatusText(task.task_status || 'running') }}</span>
                 </div>
@@ -328,7 +330,7 @@
 import { onMounted, onBeforeUnmount, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
-import { CircleCheck, CircleClose, Loading, WarningFilled } from "@element-plus/icons-vue";
+import { CircleCheck, CircleClose, Loading, WarningFilled, Close } from "@element-plus/icons-vue";
 import NodeAPI, {
   type NodeForm,
   type NodePageQuery,
@@ -663,6 +665,8 @@ function getTaskStatusText(status: string) {
     success: '完成',
     partial_success: '部分成功',
     failed: '失败',
+    cancelling: '取消中',
+    cancelled: '已取消',
   };
   return statusMap[status] || status;
 }
@@ -671,6 +675,8 @@ function progressStatus(status?: string) {
   if (status === 'success') return 'success';
   if (status === 'partial_success') return 'warning';
   if (status === 'failed') return 'exception';
+  if (status === 'cancelled') return undefined; // 取消状态不显示特殊进度条颜色
+  if (status === 'cancelling') return 'warning'; // 取消中显示警告色
   return undefined;
 }
 
@@ -806,6 +812,15 @@ onBeforeUnmount(() => {
   &.running {
     color: #909399;
     animation: rotate 1s linear infinite;
+  }
+  
+  &.cancelling {
+    color: #e6a23c;
+    animation: rotate 1s linear infinite;
+  }
+  
+  &.cancelled {
+    color: #909399;
   }
 }
 
