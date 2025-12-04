@@ -40,6 +40,7 @@
         border
         default-expand-all
         :tree-props="{ children: 'children' }"
+        :max-height="tableMaxHeight"
       >
         <el-table-column label="名称" min-width="220">
           <template #default="{ row }">
@@ -110,7 +111,7 @@
     <el-dialog
       v-model="jobDialog.visible"
       :title="jobDialog.isEdit ? '编辑 Job' : '新增 Job'"
-      width="640px"
+      width="1400px"
       :destroy-on-close="true"
     >
       <el-form :model="jobDialog.form" :rules="jobRules" ref="jobFormRef" label-width="100px">
@@ -123,46 +124,68 @@
         <el-form-item label="启用">
           <el-switch v-model="jobDialog.form.is_enabled" />
         </el-form-item>
-        <el-form-item label="Endpoints" prop="endpointsText">
-          <el-input
-            v-model="jobDialog.form.endpointsText"
-            type="textarea"
-            :rows="4"
-            placeholder="每行一个 Endpoint，例如 10.0.0.1:9100"
-          />
-          <div class="text-xs text-gray-500 mt-1">每行一个 Endpoint，自动使用 http 协议</div>
-        </el-form-item>
-        <el-form-item label="Labels">
-          <div class="w-full">
-            <div v-for="(label, index) in jobDialog.form.labels" :key="index" class="flex gap-2 mb-2 label-input-row">
-              <el-input v-model="label.key" placeholder="标签键" style="flex: 1" />
-              <el-input v-model="label.value" placeholder="标签值" style="flex: 1" />
-              <el-button
-                type="danger"
-                @click="removeLabel(index)"
-                v-if="jobDialog.form.labels.length > 1"
-                circle
-              >
-                <el-icon><Minus /></el-icon>
+        <el-form-item label="Targets" prop="targets">
+          <div class="targets-container">
+            <el-table :data="jobDialog.form.targets" border :style="{ width: '100%' }" max-height="400">
+              <el-table-column type="index" label="#" width="60" align="center" />
+              <el-table-column label="Endpoints" min-width="300">
+                <template #default="{ row, $index }">
+                  <el-input
+                    v-model="row.endpointsText"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="每行一个 Endpoint，例如：&#10;10.0.0.1:9100&#10;10.0.0.2:9100"
+                    @blur="validateEndpoints(row, $index)"
+                  />
+                  <div class="text-xs text-gray-500 mt-1">每行一个 Endpoint</div>
+                </template>
+              </el-table-column>
+              <el-table-column label="启用" width="80" align="center">
+                <template #default="{ row }">
+                  <el-switch v-model="row.is_enabled" />
+                </template>
+              </el-table-column>
+              <el-table-column label="Labels" min-width="300">
+                <template #default="{ row, $index }">
+                  <div class="target-labels">
+                    <div v-for="(label, labelIndex) in row.labels" :key="labelIndex" class="flex gap-2 mb-2 label-input-row">
+                      <el-input v-model="label.key" placeholder="标签键" style="flex: 1" size="small" />
+                      <el-input v-model="label.value" placeholder="标签值" style="flex: 1" size="small" />
+                      <el-button
+                        type="danger"
+                        @click="removeTargetLabel($index, labelIndex)"
+                        v-if="row.labels.length > 1"
+                        circle
+                        size="small"
+                      >
+                        <el-icon><Minus /></el-icon>
+                      </el-button>
+                    </div>
+                    <el-button type="primary" link size="small" @click="addTargetLabel($index)">
+                      <el-icon><Plus /></el-icon>新增标签
+                    </el-button>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="操作" width="100" align="center">
+                <template #default="{ $index }">
+                  <el-button
+                    type="danger"
+                    link
+                    size="small"
+                    icon="delete"
+                    @click="handleRemoveTarget($index)"
+                    :disabled="jobDialog.form.targets.length <= 1"
+                  >
+                    删除
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div class="mt-2">
+              <el-button type="primary" plain icon="plus" size="small" @click="handleAddTarget">
+                添加Target
               </el-button>
-            </div>
-            <el-button type="primary" link @click="addLabel">
-              <el-icon><Plus /></el-icon>新增标签
-            </el-button>
-            <div v-if="jobDialog.form.labels.some(l => l.key && l.value)" class="mt-3">
-              <div class="text-xs text-gray-500 mb-2">预览：</div>
-              <div class="tags-preview">
-                <el-tag
-                  v-for="(label, index) in jobDialog.form.labels.filter(l => l.key && l.value)"
-                  :key="index"
-                  type="primary"
-                  effect="plain"
-                  size="small"
-                  class="label-tag"
-                >
-                  {{ label.key }}: {{ label.value }}
-                </el-tag>
-              </div>
             </div>
           </div>
         </el-form-item>
@@ -201,7 +224,7 @@
 </template>
 
 <script lang="ts" setup>
-import { reactive, ref, onMounted } from "vue";
+import { reactive, ref, onMounted, computed, onUnmounted } from "vue";
 import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
 import {
   Plus,
@@ -241,6 +264,28 @@ const searchForm = reactive<SearchForm>({
   is_enabled: null,
 });
 
+// 计算表格最大高度，使表格可以滚动
+const windowHeight = ref(window.innerHeight);
+const tableMaxHeight = computed(() => {
+  // 视口高度减去顶部导航、搜索表单、卡片头部和底部边距
+  // 大约预留 300px 给其他元素
+  return windowHeight.value - 300;
+});
+
+// 监听窗口大小变化，动态调整表格高度
+const handleResize = () => {
+  windowHeight.value = window.innerHeight;
+};
+
+onMounted(() => {
+  loadData();
+  window.addEventListener("resize", handleResize);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("resize", handleResize);
+});
+
 const jobDialog = reactive({
   visible: false,
   isEdit: false,
@@ -250,8 +295,13 @@ const jobDialog = reactive({
     job_name: "",
     description: "",
     is_enabled: true,
-    endpointsText: "",
-    labels: [{ key: "", value: "" }],
+    targets: [
+      {
+        endpointsText: "",
+        is_enabled: true,
+        labels: [{ key: "", value: "" }],
+      },
+    ],
   },
 });
 
@@ -259,7 +309,28 @@ const jobFormRef = ref<FormInstance>();
 
 const jobRules: FormRules = {
   job_name: [{ required: true, message: "请输入 Job 名称", trigger: "blur" }],
-  endpointsText: [{ required: true, message: "至少输入一个 Endpoint", trigger: "blur" }],
+  targets: [
+    {
+      validator: (rule, value, callback) => {
+        if (!value || value.length === 0) {
+          callback(new Error("至少需要配置一个 Target"));
+          return;
+        }
+        const validTargets = value.filter((target: any) => {
+          const endpointsText = target.endpointsText?.trim();
+          if (!endpointsText) return false;
+          const endpoints = endpointsText.split("\n").map((ep: string) => ep.trim()).filter(Boolean);
+          return endpoints.length > 0;
+        });
+        if (validTargets.length === 0) {
+          callback(new Error("至少需要配置一个有效的 Endpoint"));
+          return;
+        }
+        callback();
+      },
+      trigger: "blur",
+    },
+  ],
 };
 
 const importDialog = reactive({
@@ -327,8 +398,13 @@ const resetJobForm = () => {
     job_name: "",
     description: "",
     is_enabled: true,
-    endpointsText: "",
-    labels: [{ key: "", value: "" }],
+    targets: [
+      {
+        endpointsText: "",
+        is_enabled: true,
+        labels: [{ key: "", value: "" }],
+      },
+    ],
   };
   jobDialog.currentId = null;
 };
@@ -347,10 +423,44 @@ const openEditDialog = async (row: TableJobNode) => {
     jobDialog.form.job_name = detail.job_name;
     jobDialog.form.description = detail.description || "";
     jobDialog.form.is_enabled = detail.is_enabled;
-    jobDialog.form.endpointsText = (detail.endpoints || [])
-      .map((endpoint) => endpoint.endpoint)
-      .join("\n");
-    jobDialog.form.labels = detail.labels.length ? detail.labels : [{ key: "", value: "" }];
+    
+    // 将 targets 转换为表单格式
+    // 将相同 is_enabled 和 labels 的 endpoints 合并到一个 target 行
+    if (detail.targets && detail.targets.length > 0) {
+      const targetMap = new Map<string, any>();
+      for (const target of detail.targets) {
+        const is_enabled = target.endpoint?.is_enabled ?? true;
+        const labels = target.labels && target.labels.length > 0 ? target.labels : [];
+        const labelsKey = JSON.stringify(labels.sort((a: any, b: any) => a.key.localeCompare(b.key)));
+        const key = `${is_enabled}_${labelsKey}`;
+        
+        if (targetMap.has(key)) {
+          const existing = targetMap.get(key);
+          const endpoint = target.endpoint?.endpoint || "";
+          if (endpoint) {
+            existing.endpointsText += (existing.endpointsText ? "\n" : "") + endpoint;
+          }
+        } else {
+          const endpoint = target.endpoint?.endpoint || "";
+          targetMap.set(key, {
+            endpointsText: endpoint,
+            is_enabled: is_enabled,
+            labels: labels.length > 0 ? labels : [{ key: "", value: "" }],
+          });
+        }
+      }
+      jobDialog.form.targets = Array.from(targetMap.values());
+    } else {
+      // 如果没有 targets，创建一个空的 target
+      jobDialog.form.targets = [
+        {
+          endpointsText: "",
+          is_enabled: true,
+          labels: [{ key: "", value: "" }],
+        },
+      ];
+    }
+    
     jobDialog.currentId = detail.id || null;
     jobDialog.isEdit = true;
     jobDialog.visible = true;
@@ -359,40 +469,87 @@ const openEditDialog = async (row: TableJobNode) => {
   }
 };
 
-const addLabel = () => {
-  jobDialog.form.labels.push({ key: "", value: "" });
+const handleAddTarget = () => {
+  jobDialog.form.targets.push({
+    endpointsText: "",
+    is_enabled: true,
+    labels: [{ key: "", value: "" }],
+  });
 };
 
-const removeLabel = (index: number) => {
-  if (jobDialog.form.labels.length === 1) return;
-  jobDialog.form.labels.splice(index, 1);
+const handleRemoveTarget = (index: number) => {
+  if (jobDialog.form.targets.length > 1) {
+    jobDialog.form.targets.splice(index, 1);
+  }
+};
+
+const addTargetLabel = (targetIndex: number) => {
+  jobDialog.form.targets[targetIndex].labels.push({ key: "", value: "" });
+};
+
+const removeTargetLabel = (targetIndex: number, labelIndex: number) => {
+  if (jobDialog.form.targets[targetIndex].labels.length > 1) {
+    jobDialog.form.targets[targetIndex].labels.splice(labelIndex, 1);
+  }
+};
+
+const validateEndpoints = (row: any, index: number) => {
+  const endpointsText = row.endpointsText?.trim();
+  if (!endpointsText) return;
+  
+  const endpoints = endpointsText.split("\n").map((ep: string) => ep.trim()).filter(Boolean);
+  const endpointPattern = /^[\w\.-]+:\d+$/;
+  
+  for (let i = 0; i < endpoints.length; i++) {
+    if (!endpointPattern.test(endpoints[i])) {
+      ElMessage.warning(`第${index + 1}行第${i + 1}个 Endpoint 格式不正确，应为 IP:PORT 或 域名:PORT`);
+      return;
+    }
+  }
 };
 
 const normalizeJobPayload = (): PrometheusJobDetail => {
-  const endpoints = jobDialog.form.endpointsText
-    .split("\n")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((endpoint) => ({
-      endpoint,
-      is_enabled: true,
-      scheme: "http",
-    }));
-
-  if (!endpoints.length) {
-    throw new Error("请至少输入一个有效 Endpoint");
+  const targets: any[] = [];
+  
+  for (const target of jobDialog.form.targets) {
+    const endpointsText = target.endpointsText?.trim();
+    if (!endpointsText) continue;
+    
+    // 解析多个 endpoints（每行一个）
+    const endpoints = endpointsText
+      .split("\n")
+      .map((ep: string) => ep.trim())
+      .filter(Boolean);
+    
+    if (endpoints.length === 0) continue;
+    
+    // 过滤有效的 labels
+    const labels = target.labels
+      .filter((label: any) => label.key && label.value)
+      .map((label: any) => ({ ...label }));
+    
+    // 为每个 endpoint 创建一个 target
+    for (const endpoint of endpoints) {
+      targets.push({
+        endpoint: {
+          endpoint: endpoint,
+          is_enabled: target.is_enabled ?? true,
+          scheme: "http", // 默认使用 http 协议
+        },
+        labels: labels,
+      });
+    }
   }
 
-  const labels = jobDialog.form.labels
-    .filter((label) => label.key && label.value)
-    .map((label) => ({ ...label }));
+  if (!targets.length) {
+    throw new Error("请至少输入一个有效的 Endpoint");
+  }
 
   return {
     job_name: jobDialog.form.job_name.trim(),
     description: jobDialog.form.description?.trim(),
     is_enabled: jobDialog.form.is_enabled,
-    endpoints,
-    labels,
+    targets,
   };
 };
 
@@ -508,10 +665,6 @@ const handleToggleStatus = async (row: TableRow) => {
     row.toggleLoading = false;
   }
 };
-
-onMounted(() => {
-  loadData();
-});
 </script>
 
 <style scoped>
@@ -573,6 +726,18 @@ onMounted(() => {
 
 .mb-2 {
   margin-bottom: 8px;
+}
+
+.targets-container {
+  width: 100%;
+}
+
+.target-labels {
+  padding: 8px 0;
+}
+
+.label-input-row {
+  align-items: flex-start;
 }
 </style>
 

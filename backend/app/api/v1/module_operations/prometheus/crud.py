@@ -27,12 +27,12 @@ class PrometheusJobCRUD(CRUDBase[PrometheusJobModel, PrometheusJobCreateSchema, 
         return result.scalars().first()
 
     async def get_with_children_crud(self, job_id: int) -> Optional[PrometheusJobModel]:
+        from .model import PrometheusEndpointModel
         stmt = (
             select(PrometheusJobModel)
             .where(PrometheusJobModel.id == job_id)
             .options(
-                selectinload(PrometheusJobModel.endpoints),
-                selectinload(PrometheusJobModel.labels),
+                selectinload(PrometheusJobModel.endpoints).selectinload(PrometheusEndpointModel.labels),
             )
         )
         result = await self.db.execute(stmt)
@@ -44,11 +44,11 @@ class PrometheusJobCRUD(CRUDBase[PrometheusJobModel, PrometheusJobCreateSchema, 
         job_name: Optional[str] = None,
         is_enabled: Optional[bool] = None,
     ) -> Sequence[PrometheusJobModel]:
+        from .model import PrometheusEndpointModel
         stmt = (
             select(PrometheusJobModel)
             .options(
-                selectinload(PrometheusJobModel.endpoints),
-                selectinload(PrometheusJobModel.labels),
+                selectinload(PrometheusJobModel.endpoints).selectinload(PrometheusEndpointModel.labels),
             )
             .order_by(PrometheusJobModel.job_name.asc())
         )

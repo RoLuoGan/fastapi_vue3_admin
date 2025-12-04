@@ -31,13 +31,17 @@ export interface PrometheusEndpointItem {
   scheme?: string;
 }
 
+export interface PrometheusTargetItem {
+  endpoint: PrometheusEndpointItem;
+  labels: PrometheusLabelItem[];
+}
+
 export interface PrometheusJobDetail {
   id?: number;
   job_name: string;
   description?: string;
   is_enabled: boolean;
-  endpoints: PrometheusEndpointItem[];
-  labels: PrometheusLabelItem[];
+  targets: PrometheusTargetItem[];
 }
 
 export interface PrometheusJobQuery {

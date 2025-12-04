@@ -32,12 +32,6 @@ class PrometheusJobModel(CreatorMixin):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
-    labels: Mapped[List["PrometheusLabelModel"]] = relationship(
-        "PrometheusLabelModel",
-        back_populates="job",
-        cascade="all, delete-orphan",
-        lazy="selectin",
-    )
 
 
 class PrometheusEndpointModel(CreatorMixin):
@@ -50,7 +44,7 @@ class PrometheusEndpointModel(CreatorMixin):
         UniqueConstraint("job_id", "endpoint", name="uq_prometheus_job_endpoint"),
         {"comment": "Prometheus Endpoint 配置"},
     )
-    __loader_options__ = ["creator", "job"]
+    __loader_options__ = ["creator", "job", "labels"]
 
     job_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("monitor_prometheus_job.id", ondelete="CASCADE"), nullable=False, index=True
@@ -60,6 +54,12 @@ class PrometheusEndpointModel(CreatorMixin):
     scheme: Mapped[str] = mapped_column(String(10), default="http", nullable=False, comment="协议")
 
     job: Mapped["PrometheusJobModel"] = relationship(back_populates="endpoints", lazy="selectin")
+    labels: Mapped[List["PrometheusLabelModel"]] = relationship(
+        "PrometheusLabelModel",
+        back_populates="endpoint",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
 
 class PrometheusLabelModel(CreatorMixin):
@@ -69,17 +69,17 @@ class PrometheusLabelModel(CreatorMixin):
 
     __tablename__ = "monitor_prometheus_label"
     __table_args__ = (
-        UniqueConstraint("job_id", "label_key", name="uq_prometheus_job_label"),
+        UniqueConstraint("endpoint_id", "label_key", name="uq_prometheus_endpoint_label"),
         {"comment": "Prometheus Label 配置"},
     )
-    __loader_options__ = ["creator", "job"]
+    __loader_options__ = ["creator", "endpoint"]
 
-    job_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("monitor_prometheus_job.id", ondelete="CASCADE"), nullable=False, index=True
+    endpoint_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("monitor_prometheus_endpoint.id", ondelete="CASCADE"), nullable=False, index=True
     )
     label_key: Mapped[str] = mapped_column(String(64), nullable=False, comment="标签键")
     label_value: Mapped[str] = mapped_column(String(255), nullable=False, comment="标签值")
 
-    job: Mapped["PrometheusJobModel"] = relationship(back_populates="labels", lazy="selectin")
+    endpoint: Mapped["PrometheusEndpointModel"] = relationship(back_populates="labels", lazy="selectin")
 
 
