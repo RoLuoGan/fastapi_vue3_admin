@@ -18,6 +18,43 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.core.base_model import MappedBase
+
+# 导入所有模型，确保 Alembic 能够检测到它们
+# 系统模块
+from app.api.v1.module_system.user.model import UserModel, UserRolesModel, UserPositionsModel
+from app.api.v1.module_system.role.model import RoleModel, RoleDeptsModel, RoleMenusModel
+from app.api.v1.module_system.position.model import PositionModel
+from app.api.v1.module_system.dept.model import DeptModel
+from app.api.v1.module_system.menu.model import MenuModel
+from app.api.v1.module_system.params.model import ParamsModel
+from app.api.v1.module_system.dict.model import DictTypeModel, DictDataModel
+from app.api.v1.module_system.notice.model import NoticeModel
+from app.api.v1.module_system.log.model import OperationLogModel
+
+# 运维模块
+from app.api.v1.module_operations.models import (
+    ServiceModel,
+    ServicePackageModel,
+    NodeModel,
+    TaskModel,
+    TaskLogModel,
+    node_service_association
+)
+from app.api.v1.module_operations.prometheus.model import (
+    PrometheusJobModel,
+    PrometheusEndpointModel,
+    PrometheusLabelModel
+)
+
+# 代码生成模块
+from app.api.v1.module_generator.gencode.model import GenTableModel, GenTableColumnModel
+from app.api.v1.module_generator.demo.model import DemoModel
+
+# 应用模块
+from app.api.v1.module_application.myapp.model import ApplicationModel
+from app.api.v1.module_application.job.model import JobModel, JobLogModel
+from app.api.v1.module_application.ai.model import McpModel
+
 target_metadata = MappedBase.metadata
 
 # other values from the config, defined by the needs of env.py,

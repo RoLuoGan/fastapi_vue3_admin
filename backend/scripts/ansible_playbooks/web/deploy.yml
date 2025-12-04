@@ -6,7 +6,7 @@
   tasks:
     - name: Create remote bak directory /data/service/bak/{{ back_date }}
       file:
-        path: "/data/service/bak/{{ back_date }"
+        path: "/data/service/bak/{{ back_date }}"
         state: directory
       become: true
 
@@ -17,5 +17,5 @@
     - name: unarchive package to remote
       unarchive:
         src: "{{ local_pkg_path }}"
-        dest: "/data/service/web/}"
+        dest: "/data/service/web/"
       become: true
