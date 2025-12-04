@@ -10,7 +10,7 @@ from app.api.v1.module_system.auth.schema import AuthSchema
 
 from ..service_module.crud import ServiceCRUD
 from .crud import ServerCRUD
-from .schema import ServerCreateSchema, ServerUpdateSchema, ServerOutSchema
+from .schema import ServerCreateSchema, ServerUpdateSchema, ServerOutSchema, ServerBatchCreateSchema
 from ..service_module.schema import ServiceOutSchema
 
 
@@ -83,6 +83,80 @@ class ServerService:
         if node.service:
             node_dict["service_name"] = node.service.name
         return node_dict
+
+    @classmethod
+    async def batch_create_server_service(cls, auth: AuthSchema, data: ServerBatchCreateSchema) -> Dict:
+        """
+        批量创建服务器节点
+        
+        参数:
+        - auth (AuthSchema): 认证信息模型
+        - data (ServerBatchCreateSchema): 批量创建模型
+        
+        返回:
+        - Dict: 包含成功和失败信息的字典
+        """
+        # 提取service_ids用于多对多关联
+        service_ids = data.service_ids or []
+        
+        # 获取基础数据（排除ips和service_ids）
+        base_data = data.model_dump(exclude={'ips', 'service_ids'}, exclude_unset=True)
+        port = base_data.get('port') or 22
+        
+        # 如果提供了主service_id，验证其存在性
+        if base_data.get('service_id'):
+            service = await ServiceCRUD(auth).get_by_id_crud(id=base_data['service_id'])
+            if not service:
+                raise CustomException(msg="创建失败，服务模块不存在")
+        
+        # 批量创建节点
+        created_nodes = []
+        failed_nodes = []
+        
+        for ip in data.ips:
+            try:
+                # 检查IP+端口唯一性
+                existing = await ServerCRUD(auth).get_list_crud(
+                    search={"ip": ip, "port": port}
+                )
+                if existing:
+                    failed_nodes.append({
+                        "ip": ip,
+                        "error": f"已存在IP {ip}:{port} 的节点"
+                    })
+                    continue
+                
+                # 为每个IP创建节点数据
+                node_data = {**base_data, "ip": ip}
+                node = await ServerCRUD(auth).create(data=node_data)
+                
+                # 处理多对多关联
+                if service_ids:
+                    services = []
+                    for sid in service_ids:
+                        service = await ServiceCRUD(auth).get_by_id_crud(id=sid)
+                        if service:
+                            services.append(service)
+                    node.services = services
+                    await auth.db.flush()
+                    await auth.db.refresh(node)
+                
+                node_dict = ServerOutSchema.model_validate(node).model_dump()
+                if node.service:
+                    node_dict["service_name"] = node.service.name
+                created_nodes.append(node_dict)
+            except Exception as e:
+                failed_nodes.append({
+                    "ip": ip,
+                    "error": str(e)
+                })
+        
+        return {
+            "success_count": len(created_nodes),
+            "failed_count": len(failed_nodes),
+            "created_nodes": created_nodes,
+            "failed_nodes": failed_nodes
+        }
 
     @classmethod
     async def update_server_service(cls, auth: AuthSchema, id: int, data: ServerUpdateSchema) -> Dict:

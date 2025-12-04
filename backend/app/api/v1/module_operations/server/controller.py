@@ -14,7 +14,7 @@ from app.core.logger import logger
 from app.api.v1.module_system.auth.schema import AuthSchema
 
 from .param import ServerQueryParam
-from .schema import ServerCreateSchema, ServerUpdateSchema
+from .schema import ServerCreateSchema, ServerUpdateSchema, ServerBatchCreateSchema
 from .service import ServerService
 
 router = APIRouter(route_class=OperationLogRoute, prefix="/node", tags=["服务器管理"])
@@ -47,7 +47,7 @@ async def get_server_detail_controller(
     return SuccessResponse(data=result, msg="查询节点详情成功")
 
 
-@router.post("/node/create", summary="创建节点", description="创建节点")
+@router.post("/node/create", summary="创建节点", description="创建节点（支持单个和批量）")
 async def create_server_controller(
     data: ServerCreateSchema,
     auth: AuthSchema = Depends(AuthPermission(["operations:node:create"])),
@@ -55,6 +55,18 @@ async def create_server_controller(
     result = await ServerService.create_server_service(data=data, auth=auth)
     logger.info(f"创建节点成功: {result}")
     return SuccessResponse(data=result, msg="创建节点成功")
+
+
+@router.post("/node/batch-create", summary="批量创建节点", description="批量创建节点")
+async def batch_create_server_controller(
+    data: ServerBatchCreateSchema,
+    auth: AuthSchema = Depends(AuthPermission(["operations:node:create"])),
+) -> JSONResponse:
+    result = await ServerService.batch_create_server_service(data=data, auth=auth)
+    logger.info(f"批量创建节点成功: 成功{result['success_count']}个, 失败{result['failed_count']}个")
+    if result['failed_count'] > 0:
+        return SuccessResponse(data=result, msg=f"批量创建完成: 成功{result['success_count']}个, 失败{result['failed_count']}个")
+    return SuccessResponse(data=result, msg=f"批量创建节点成功，共创建{result['success_count']}个节点")
 
 
 @router.put("/node/update/{id}", summary="修改节点", description="修改节点")

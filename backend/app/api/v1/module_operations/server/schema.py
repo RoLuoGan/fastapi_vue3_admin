@@ -39,6 +39,44 @@ class ServerCreateSchema(BaseModel):
         return value
 
 
+class ServerBatchCreateSchema(BaseModel):
+    """服务器节点批量创建模型"""
+    service_id: Optional[int] = Field(default=None, ge=1, description="服务模块ID")
+    ips: List[str] = Field(..., min_length=1, description="节点IP地址列表")
+    port: Optional[int] = Field(default=22, ge=1, le=65535, description="端口号")
+    status: bool = Field(default=True, description="是否启用(True:启用 False:停用)")
+    description: Optional[str] = Field(default=None, max_length=255, description="备注说明")
+    project: Optional[str] = Field(default=None, max_length=50, description="运维管理项目")
+    idc: Optional[str] = Field(default=None, max_length=50, description="机房")
+    tags: Optional[str] = Field(default=None, max_length=100, description="服务器标签")
+    operator_type: Optional[str] = Field(default=None, max_length=50, description="操作类型(deploy:部署, restart:重启, init:初始化 等)")
+    service_ids: Optional[List[int]] = Field(default=None, description="关联的服务模块ID列表")
+
+    @field_validator("ips")
+    @classmethod
+    def validate_ips(cls, value: List[str]) -> List[str]:
+        if not value or len(value) == 0:
+            raise ValueError("节点IP地址列表不能为空")
+        import re
+        ip_pattern = r"^(\d{1,3}\.){3}\d{1,3}$"
+        validated_ips = []
+        for ip in value:
+            ip = ip.strip()
+            if not ip:
+                continue
+            if not re.match(ip_pattern, ip):
+                raise ValueError(f"IP地址格式不正确: {ip}")
+            parts = ip.split(".")
+            for part in parts:
+                if not 0 <= int(part) <= 255:
+                    raise ValueError(f"IP地址段必须在0-255范围内: {ip}")
+            validated_ips.append(ip)
+        if len(validated_ips) == 0:
+            raise ValueError("节点IP地址列表不能为空")
+        # 去重
+        return list(dict.fromkeys(validated_ips))
+
+
 class ServerUpdateSchema(ServerCreateSchema):
     """服务器节点更新模型"""
     ...

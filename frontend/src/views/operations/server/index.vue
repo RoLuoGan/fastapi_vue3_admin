@@ -199,7 +199,42 @@
       </template>
       <div v-else>
         <el-form ref="nodeFormRef" :model="nodeForm" :rules="nodeRules" label-width="100px" label-suffix=":">
-          <el-form-item label="节点IP" prop="ip">
+          <el-form-item v-if="dialog.type === 'create'" label="节点IP列表" prop="ipList">
+            <div class="ip-list-container">
+              <el-table :data="nodeForm.ipList" border :style="{ width: '100%' }" max-height="300">
+                <el-table-column type="index" label="#" width="60" align="center" />
+                <el-table-column label="节点IP" prop="ip">
+                  <template #default="{ row, $index }">
+                    <el-input
+                      v-model="row.ip"
+                      placeholder="请输入节点IP"
+                      @blur="validateIp(row, $index)"
+                    />
+                  </template>
+                </el-table-column>
+                <el-table-column label="操作" width="100" align="center">
+                  <template #default="{ $index }">
+                    <el-button
+                      type="danger"
+                      link
+                      size="small"
+                      icon="delete"
+                      @click="handleRemoveIp($index)"
+                      :disabled="nodeForm.ipList.length <= 1"
+                    >
+                      删除
+                    </el-button>
+                  </template>
+                </el-table-column>
+              </el-table>
+              <div class="mt-2">
+                <el-button type="primary" plain icon="plus" size="small" @click="handleAddIp">
+                  添加IP
+                </el-button>
+              </div>
+            </div>
+          </el-form-item>
+          <el-form-item v-else label="节点IP" prop="ip">
             <el-input v-model="nodeForm.ip" placeholder="请输入节点IP" />
           </el-form-item>
           <el-form-item label="端口" prop="port">
@@ -337,6 +372,7 @@ import NodeAPI, {
   type NodeTable,
   type ServiceTable,
   type TaskTable,
+  type NodeBatchForm,
 } from "@/api/operations/node";
 import DictAPI from "@/api/system/dict";
 
@@ -380,7 +416,7 @@ const dialog = reactive({
 });
 
 const nodeFormRef = ref<FormInstance>();
-const nodeForm = reactive<NodeForm>({
+const nodeForm = reactive<NodeForm & { ipList: Array<{ ip: string }> }>({
   service_id: undefined,
   service_ids: [] as number[],
   ip: "",
@@ -390,14 +426,50 @@ const nodeForm = reactive<NodeForm>({
   project: undefined,
   idc: undefined,
   tags: undefined,
+  ipList: [{ ip: "" }],
 });
 
 const nodeDetail = ref<NodeTable>();
 
-const nodeRules: FormRules<NodeForm> = {
+const nodeRules: FormRules<NodeForm & { ipList: Array<{ ip: string }> }> = {
   ip: [
     { required: true, message: "请输入节点IP地址", trigger: "blur" },
     { pattern: /^(\d{1,3}\.){3}\d{1,3}$/, message: "IP地址格式不正确", trigger: "blur" },
+  ],
+  ipList: [
+    {
+      validator: (rule, value, callback) => {
+        if (dialog.type === "create") {
+          const validIps = value.filter((item: { ip: string }) => {
+            const ip = item.ip?.trim();
+            if (!ip) return false;
+            const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+            if (!ipPattern.test(ip)) return false;
+            const parts = ip.split(".");
+            return parts.every((part) => {
+              const num = parseInt(part);
+              return num >= 0 && num <= 255;
+            });
+          });
+          if (validIps.length === 0) {
+            callback(new Error("请至少输入一个有效的节点IP地址"));
+            return;
+          }
+          // 检查重复IP
+          const ipSet = new Set<string>();
+          for (const item of value) {
+            const ip = item.ip?.trim();
+            if (ip && ipSet.has(ip)) {
+              callback(new Error(`IP地址 ${ip} 重复`));
+              return;
+            }
+            if (ip) ipSet.add(ip);
+          }
+        }
+        callback();
+      },
+      trigger: "blur",
+    },
   ],
   port: [{ required: true, message: "请输入端口", trigger: "change" }],
 };
@@ -481,6 +553,35 @@ function resetForm() {
   nodeForm.project = undefined;
   nodeForm.idc = undefined;
   nodeForm.tags = undefined;
+  nodeForm.ipList = [{ ip: "" }];
+}
+
+function handleAddIp() {
+  nodeForm.ipList.push({ ip: "" });
+}
+
+function handleRemoveIp(index: number) {
+  if (nodeForm.ipList.length > 1) {
+    nodeForm.ipList.splice(index, 1);
+  }
+}
+
+function validateIp(row: { ip: string }, index: number) {
+  const ip = row.ip?.trim();
+  if (!ip) return;
+  const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+  if (!ipPattern.test(ip)) {
+    ElMessage.warning(`第${index + 1}行IP地址格式不正确`);
+    return;
+  }
+  const parts = ip.split(".");
+  for (const part of parts) {
+    const num = parseInt(part);
+    if (num < 0 || num > 255) {
+      ElMessage.warning(`第${index + 1}行IP地址段必须在0-255范围内`);
+      return;
+    }
+  }
 }
 
 async function handleOpenDialog(type: DialogType, id?: number) {
@@ -536,14 +637,56 @@ function handleSubmit() {
     if (!valid) return;
     dialogLoading.value = true;
     try {
-      const submitData = {
-        ...nodeForm,
-        service_ids: nodeForm.service_ids || []
-      };
       if (dialog.type === "create") {
-        await NodeAPI.createNode(submitData);
-        ElMessage.success("新增节点成功");
+        // 批量创建
+        const validIps = nodeForm.ipList
+          .map((item) => item.ip?.trim())
+          .filter((ip) => ip && /^(\d{1,3}\.){3}\d{1,3}$/.test(ip));
+        
+        if (validIps.length === 0) {
+          ElMessage.warning("请至少输入一个有效的节点IP地址");
+          dialogLoading.value = false;
+          return;
+        }
+
+        // 去重
+        const uniqueIps = Array.from(new Set(validIps));
+
+        const batchData: NodeBatchForm = {
+          service_id: nodeForm.service_id,
+          service_ids: nodeForm.service_ids || [],
+          ips: uniqueIps,
+          port: nodeForm.port || 22,
+          status: nodeForm.status ?? true,
+          description: nodeForm.description,
+          project: nodeForm.project,
+          idc: nodeForm.idc,
+          tags: nodeForm.tags,
+        };
+
+        const result = await NodeAPI.batchCreateNode(batchData);
+        if (result.data.data.failed_count > 0) {
+          ElMessage.warning(
+            `批量创建完成: 成功${result.data.data.success_count}个, 失败${result.data.data.failed_count}个`
+          );
+          if (result.data.data.failed_nodes.length > 0) {
+            const errorMsg = result.data.data.failed_nodes
+              .map((item) => `${item.ip}: ${item.error}`)
+              .join("\n");
+            ElMessageBox.alert(errorMsg, "创建失败的节点", {
+              type: "warning",
+              confirmButtonText: "确定",
+            });
+          }
+        } else {
+          ElMessage.success(`批量创建节点成功，共创建${result.data.data.success_count}个节点`);
+        }
       } else if (dialog.targetId) {
+        // 单个更新
+        const submitData = {
+          ...nodeForm,
+          service_ids: nodeForm.service_ids || [],
+        };
         await NodeAPI.updateNode(dialog.targetId, submitData);
         ElMessage.success("更新节点成功");
       }
@@ -850,6 +993,10 @@ onBeforeUnmount(() => {
 .empty-tasks {
   text-align: center;
   padding: 40px 0;
+}
+
+.ip-list-container {
+  width: 100%;
 }
 </style>
 

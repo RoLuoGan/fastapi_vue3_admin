@@ -75,6 +75,14 @@ const NodeAPI = {
     });
   },
 
+  batchCreateNode(body: NodeBatchForm) {
+    return request<ApiResponse<NodeBatchResult>>({
+      url: `${API_PATH}/node/batch-create`,
+      method: "post",
+      data: body,
+    });
+  },
+
   updateNode(id: number, body: NodeForm) {
     return request<ApiResponse<NodeTable>>({
       url: `${API_PATH}/node/update/${id}`,
@@ -265,6 +273,28 @@ export interface NodeForm {
   project?: string;
   idc?: string;
   tags?: string;
+}
+
+export interface NodeBatchForm {
+  service_id?: number;
+  service_ids?: number[];
+  ips: string[];
+  port?: number;
+  status?: boolean;
+  description?: string;
+  project?: string;
+  idc?: string;
+  tags?: string;
+}
+
+export interface NodeBatchResult {
+  success_count: number;
+  failed_count: number;
+  created_nodes: NodeTable[];
+  failed_nodes: Array<{
+    ip: string;
+    error: string;
+  }>;
 }
 
 export interface NodePageQuery extends PageQuery {
