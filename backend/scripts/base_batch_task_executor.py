@@ -277,11 +277,13 @@ class BaseBatchTaskExecutor(ABC):
                 if not host:
                     continue
                 
-                vars_parts = [f"ansible_port={port}", f"ansible_user={user}"]
+                # 生成动态别名：{模块名}_{ip}_{port}
+                alias = f"{safe_group}_{host}_{port}"
+                vars_parts = [f"ansible_host={host}", f"ansible_port={port}", f"ansible_user={user}"]
                 if password:
                     vars_parts.append(f"ansible_password={password}")
                 extra_vars = " ".join(vars_parts)
-                lines.append(f"{host} {extra_vars}")
+                lines.append(f"{alias} {extra_vars}")
             
             # 增加组变量支持
             group_vars = meta.get("ansible_vars")

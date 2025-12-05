@@ -237,7 +237,7 @@ interface PageOperatorMeta {
   service_id: number;
   service_name?: string;
   node_ids: number[];
-  nodes?: { id: number; ip: string }[];
+  nodes?: { id: number; ip: string; port?: number }[];
   [key: string]: any;
 }
 
@@ -747,19 +747,20 @@ function buildOperatorMetas(nodeIds: number[]): PageOperatorMeta[] {
     }
   });
   
-  // 转换为数组格式，包含 service_name 和每个节点的 ip
+  // 转换为数组格式，包含 service_name 和每个节点的 ip 和 port
   const result = Array.from(serviceMetaMap.entries()).map(([service_id, meta]) => {
-    // 构建节点信息列表，包含 ip
+    // 构建节点信息列表，包含 ip 和 port
     const nodes = meta.nodes.map((node: any) => ({
       id: node.id,
-      ip: node.ip || ''
+      ip: node.ip || '',
+      port: node.port || 22
     }));
     
     return {
       service_id,
       service_name: meta.service_name,
       node_ids: meta.node_ids,
-      nodes: nodes,  // 添加节点信息，包含 ip
+      nodes: nodes,  // 添加节点信息，包含 ip 和 port
       project: meta.project,
       module_group: meta.module_group
     };
@@ -818,13 +819,13 @@ async function confirmDeploy() {
             if (row.version) {
                 const found = row.versions.find((v: any) => v.version === row.version);
                 if (found) {
-                    // 确保传递 service_name 和 nodes (包含IP)
+                    // 确保传递 service_name 和 nodes (包含IP和port)
                     const meta = {
                         service_id: row.service_id,
                         service_name: row.service_name || '',
                         node_ids: row.node_ids,
                         // 只传递必要的节点信息，避免传递多余字段或Proxy对象
-                        nodes: row.nodes ? row.nodes.map((n: any) => ({ id: n.id, ip: n.ip })) : [], 
+                        nodes: row.nodes ? row.nodes.map((n: any) => ({ id: n.id, ip: n.ip, port: n.port || 22 })) : [], 
                         version: row.version,
                         package_path: found.package_path,
                         md5: found.md5,
