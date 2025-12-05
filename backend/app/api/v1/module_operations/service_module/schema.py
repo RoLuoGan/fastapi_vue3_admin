@@ -24,6 +24,7 @@ class ServiceCreateSchema(BaseModel):
     description: Optional[str] = Field(default=None, max_length=255, description="备注说明")
     project: Optional[str] = Field(default=None, max_length=50, description="运维管理项目")
     module_group: Optional[str] = Field(default=None, max_length=50, description="模块分组")
+    endpoint_port: Optional[int] = Field(default=None, ge=1, le=65535, description="服务端口号(用于Nginx代理)")
     node_ids: Optional[List[int]] = Field(default=None, description="关联的节点ID列表")
 
     @field_validator("name")
@@ -57,6 +58,7 @@ class ServiceOutSchema(ServiceCreateSchema, BaseSchema):
     model_config = {"from_attributes": True}
 
     current_package_version: Optional[str] = Field(default=None, description="当前软件包版本号")
+    endpoint_port: Optional[int] = Field(default=None, description="服务端口号(用于Nginx代理)")
     nodes: Optional[List["ServerOutSchema"]] = Field(default=None, description="节点列表")
 
 

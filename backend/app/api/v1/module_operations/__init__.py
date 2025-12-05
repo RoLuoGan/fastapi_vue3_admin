@@ -7,6 +7,7 @@ from .service_package import ServicePackageRouter
 from .server import ServerRouter
 from .task import TaskRouter
 from .prometheus import PrometheusRouter
+from .nginx_upstream import router as NginxUpstreamRouter
 
 
 OperationsRouter = APIRouter(prefix="/operations")
@@ -15,4 +16,5 @@ OperationsRouter.include_router(ServicePackageRouter)
 OperationsRouter.include_router(ServerRouter)
 OperationsRouter.include_router(TaskRouter)
 OperationsRouter.include_router(PrometheusRouter)
+OperationsRouter.include_router(NginxUpstreamRouter)
 

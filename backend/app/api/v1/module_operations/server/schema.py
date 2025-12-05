@@ -166,3 +166,7 @@ class ServerOutSchema(ServerCreateSchema, BaseSchema):
         
         return values
 
+
+# 别名：NodeOutSchema 是 ServerOutSchema 的别名，用于向后兼容
+NodeOutSchema = ServerOutSchema
+

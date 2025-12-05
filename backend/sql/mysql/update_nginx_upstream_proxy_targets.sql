@@ -1,0 +1,37 @@
+-- 更新 Nginx Upstream 代理目标字段说明
+-- proxy_targets 字段为 JSON 格式，存储代理目标列表
+-- 
+-- 字段结构示例：
+-- [
+--   {
+--     "ip": "192.168.1.1",
+--     "port": 80,
+--     "service_id": 1,
+--     "status": "up"  -- 新增字段：up(启用) / down(禁用)
+--   },
+--   {
+--     "ip": "192.168.1.2",
+--     "port": 80,
+--     "service_id": 1,
+--     "status": "down"  -- down状态的服务器
+--   }
+-- ]
+--
+-- 注意：此修改为 JSON 字段内部结构变更，无需执行 SQL 脚本
+-- 旧数据兼容：未设置 status 字段的数据默认为 "up"
+--
+-- Jinja2模板使用示例：
+-- upstream {{ service_name }}_upstream {
+-- {% for host in hosts %}
+--     server {{ host.ip }}:{{ host.port }}{% if host.status == 'down' %} down{% endif %};
+-- {% endfor %}
+-- }
+--
+-- 渲染结果示例：
+-- upstream myapp_upstream {
+--     server 192.168.1.1:80;
+--     server 192.168.1.2:80 down;
+-- }
+
+-- 表结构无需修改
+-- ALTER TABLE operations_nginx_upstream ...;

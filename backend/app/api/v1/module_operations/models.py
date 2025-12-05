@@ -37,6 +37,7 @@ class ServiceModel(CreatorMixin):
     project: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="运维管理项目")
     module_group: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="模块分组")
     current_package_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="当前软件包版本号")
+    endpoint_port: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="服务端口号(用于Nginx代理)")
     
     # 关联关系（多对多）
     nodes: Mapped[List["NodeModel"]] = relationship(
@@ -143,4 +144,25 @@ class TaskLogModel(CreatorMixin):
     content: Mapped[str] = mapped_column(Text, nullable=False, comment="日志内容（支持多行，每1000行一条记录）")
     line_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1, comment="本条记录包含的行数")
     timestamp: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True, comment="Unix时间戳（秒）")
+
+
+class NginxUpstreamModel(CreatorMixin):
+    """
+    Nginx Upstream表 - 用于存储Nginx Upstream配置
+    """
+    __tablename__ = "operations_nginx_upstream"
+    __table_args__ = (
+        UniqueConstraint('upstream', 'nginx_node_id', name='uq_nginx_upstream_name_node'),
+        {'comment': 'Nginx Upstream表'}
+    )
+    __loader_options__ = ["creator", "nginx_node"]
+
+    # 基础字段
+    upstream: Mapped[str] = mapped_column(String(100), nullable=False, comment="upstream名称")
+    proxy_targets: Mapped[str] = mapped_column(Text, nullable=False, comment="代理目标列表(JSON格式)")
+    nginx_node_id: Mapped[int] = mapped_column(Integer, ForeignKey("operations_node.id", ondelete="CASCADE"), nullable=False, index=True, comment="Nginx节点ID")
+    upstream_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="upstream模板（Jinja2格式）")
+    
+    # 关联关系
+    nginx_node: Mapped["NodeModel"] = relationship("NodeModel", foreign_keys=[nginx_node_id], lazy="selectin")
 
