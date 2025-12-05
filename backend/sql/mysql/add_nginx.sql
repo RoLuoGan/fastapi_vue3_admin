@@ -9,9 +9,6 @@ CREATE TABLE `operations_nginx_upstream` (
   `proxy_targets` text NOT NULL COMMENT '代理目标列表(JSON格式)',
   `nginx_node_id` int NOT NULL COMMENT 'Nginx节点ID',
   `upstream_template` text DEFAULT NULL COMMENT 'upstream模板（Jinja2格式）',
-  `health_check_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否启用健康检查',
-  `health_status` varchar(20) DEFAULT NULL COMMENT '健康状态(healthy:健康, unhealthy:不健康, unknown:未知)',
-  `last_check_time` int DEFAULT NULL COMMENT '最后检查时间（Unix时间戳）',
   `description` text DEFAULT NULL COMMENT '备注/描述',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
@@ -79,10 +76,6 @@ WHERE NOT EXISTS (SELECT 1 FROM `system_menu` WHERE `name` = '修改Nginx Upstre
 INSERT INTO `system_menu` (name, type, `order`, status, permission, icon, route_name, route_path, component_path, redirect, hidden, keep_alive, always_show, title, params, affix, parent_id, description, created_at, updated_at)
 SELECT '删除Nginx Upstream', 3, 4, 1, 'operations:nginx_upstream:delete', NULL, NULL, NULL, NULL, NULL, 0, 1, 0, '删除Nginx Upstream', NULL, 0, @nginxUpstreamMenuId, '删除Nginx Upstream配置', now(), now()
 WHERE NOT EXISTS (SELECT 1 FROM `system_menu` WHERE `name` = '删除Nginx Upstream' AND `permission` = 'operations:nginx_upstream:delete');
-
-INSERT INTO `system_menu` (name, type, `order`, status, permission, icon, route_name, route_path, component_path, redirect, hidden, keep_alive, always_show, title, params, affix, parent_id, description, created_at, updated_at)
-SELECT 'Nginx Upstream健康检查', 3, 5, 1, 'operations:nginx_upstream:health_check', NULL, NULL, NULL, NULL, NULL, 0, 1, 0, 'Nginx Upstream健康检查', NULL, 0, @nginxUpstreamMenuId, '执行Nginx Upstream健康检查', now(), now()
-WHERE NOT EXISTS (SELECT 1 FROM `system_menu` WHERE `name` = 'Nginx Upstream健康检查' AND `permission` = 'operations:nginx_upstream:health_check');
 
 INSERT INTO `system_menu` (name, type, `order`, status, permission, icon, route_name, route_path, component_path, redirect, hidden, keep_alive, always_show, title, params, affix, parent_id, description, created_at, updated_at)
 SELECT '同步Nginx Upstream配置', 3, 6, 1, 'operations:nginx_upstream:sync', NULL, NULL, NULL, NULL, NULL, 0, 1, 0, '同步Nginx Upstream配置', NULL, 0, @nginxUpstreamMenuId, '同步Nginx Upstream配置到Nginx节点', now(), now()

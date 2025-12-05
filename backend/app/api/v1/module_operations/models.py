@@ -18,6 +18,15 @@ node_service_association = Table(
     extend_existing=True,
 )
 
+# Nginx Upstream与节点关联表（多对多）
+nginx_upstream_node_association = Table(
+    'operations_nginx_upstream_node',
+    CreatorMixin.metadata,
+    Column('nginx_upstream_id', Integer, ForeignKey('operations_nginx_upstream.id', ondelete='CASCADE'), primary_key=True),
+    Column('node_id', Integer, ForeignKey('operations_node.id', ondelete='CASCADE'), primary_key=True),
+    extend_existing=True,
+)
+
 
 class ServiceModel(CreatorMixin):
     """
@@ -152,17 +161,20 @@ class NginxUpstreamModel(CreatorMixin):
     """
     __tablename__ = "operations_nginx_upstream"
     __table_args__ = (
-        UniqueConstraint('upstream', 'nginx_node_id', name='uq_nginx_upstream_name_node'),
+        UniqueConstraint('upstream', name='uq_nginx_upstream_name'),
         {'comment': 'Nginx Upstream表'}
     )
-    __loader_options__ = ["creator", "nginx_node"]
+    __loader_options__ = ["creator", "nginx_nodes"]
 
     # 基础字段
     upstream: Mapped[str] = mapped_column(String(100), nullable=False, comment="upstream名称")
     proxy_targets: Mapped[str] = mapped_column(Text, nullable=False, comment="代理目标列表(JSON格式)")
-    nginx_node_id: Mapped[int] = mapped_column(Integer, ForeignKey("operations_node.id", ondelete="CASCADE"), nullable=False, index=True, comment="Nginx节点ID")
     upstream_template: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="upstream模板（Jinja2格式）")
     
     # 关联关系
-    nginx_node: Mapped["NodeModel"] = relationship("NodeModel", foreign_keys=[nginx_node_id], lazy="selectin")
+    nginx_nodes: Mapped[List["NodeModel"]] = relationship(
+        "NodeModel",
+        secondary=nginx_upstream_node_association,
+        lazy="selectin"
+    )
 

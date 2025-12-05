@@ -36,7 +36,7 @@ class NginxUpstreamCreateSchema(BaseModel):
     """Nginx Upstream创建模型"""
     upstream: str = Field(..., max_length=100, description="upstream名称")
     proxy_targets: List[ProxyTargetSchema] = Field(..., min_length=1, description="代理目标列表")
-    nginx_node_id: int = Field(..., description="Nginx节点ID")
+    nginx_node_ids: List[int] = Field(..., min_length=1, description="Nginx节点ID列表")
     upstream_template: Optional[str] = Field(default=None, description="upstream模板（Jinja2格式）")
     description: Optional[str] = Field(default=None, max_length=255, description="描述")
 
@@ -75,7 +75,9 @@ class NginxUpstreamOutSchema(NginxUpstreamCreateSchema, BaseSchema):
     """Nginx Upstream响应模型"""
     model_config = {"from_attributes": True}
 
-    nginx_node: Optional["NodeOutSchema"] = Field(default=None, description="Nginx节点信息")
+    nginx_nodes: Optional[List["NodeOutSchema"]] = Field(default=None, description="Nginx节点列表")
+    # 覆盖 CreateSchema 中的 nginx_node_ids，使其在 OutSchema 中可选且允许空列表
+    nginx_node_ids: Optional[List[int]] = Field(default=None, description="Nginx节点ID列表")
 
     @model_validator(mode="before")
     @classmethod
@@ -86,15 +88,21 @@ class NginxUpstreamOutSchema(NginxUpstreamCreateSchema, BaseSchema):
 
         # 如果是ORM对象，转换为字典
         if not isinstance(values, dict):
+            obj = values
             attr_names = [
-                "id", "upstream", "proxy_targets", "nginx_node_id", "upstream_template",
+                "id", "upstream", "proxy_targets", "upstream_template",
                 "description", "created_at", "updated_at"
             ]
-            values = {name: getattr(values, name, None) for name in attr_names}
-            # 获取关联的nginx_node
-            if hasattr(values, "nginx_node"):
+            values = {name: getattr(obj, name, None) for name in attr_names}
+            # 获取关联的nginx_nodes
+            if hasattr(obj, "nginx_nodes"):
                 from ..server.schema import NodeOutSchema
-                values["nginx_node"] = NodeOutSchema.model_validate(values.nginx_node).model_dump() if values.nginx_node else None
+                nginx_nodes = getattr(obj, "nginx_nodes", None)
+                values["nginx_nodes"] = [NodeOutSchema.model_validate(node).model_dump() for node in nginx_nodes] if nginx_nodes else []
+                # 填充 nginx_node_ids 以匹配 CreateSchema
+                values["nginx_node_ids"] = [node.id for node in nginx_nodes] if nginx_nodes else None
+            else:
+                values["nginx_node_ids"] = None
 
         # 解析 JSON 格式的 proxy_targets 字段
         proxy_targets = values.get("proxy_targets")

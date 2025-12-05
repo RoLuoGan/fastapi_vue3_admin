@@ -32,17 +32,46 @@ class TaskCRUD(CRUDBase[TaskModel, Dict, Dict]):
         try:
             sql = select(self.model).order_by(self.model.created_at.desc())
             
-            # 如果指定了任务类型，添加过滤条件
+            # 如果指定了任务类型，需要同时检查 task_type 字段和 params JSON 中的 task_type
             if task_type:
-                sql = sql.where(self.model.task_type == task_type)
-            
-            sql = sql.limit(limit)
+                import json
+                # 先获取所有任务，然后在 Python 中过滤
+                # 因为需要解析 JSON，所以不能直接在 SQL 中过滤
+                sql = sql.limit(limit * 3)  # 多取一些，以便过滤后还有足够的数据
+            else:
+                sql = sql.limit(limit)
             
             for opt in self._CRUDBase__loader_options(preload):
                 sql = sql.options(opt)
             sql = await self._CRUDBase__filter_permissions(sql)
             result: Result = await self.db.execute(sql)
-            return result.scalars().all()
+            tasks = result.scalars().all()
+            
+            # 如果指定了 task_type，需要从 params JSON 中过滤
+            if task_type:
+                filtered_tasks = []
+                for task in tasks:
+                    # 先检查 task_type 字段
+                    if task.task_type == task_type:
+                        filtered_tasks.append(task)
+                        continue
+                    
+                    # 再检查 params JSON 中的 task_type
+                    if task.params:
+                        try:
+                            params = json.loads(task.params) if isinstance(task.params, str) else task.params
+                            if isinstance(params, dict) and params.get("task_type") == task_type:
+                                filtered_tasks.append(task)
+                                continue
+                        except:
+                            pass
+                    
+                    if len(filtered_tasks) >= limit:
+                        break
+                
+                return filtered_tasks[:limit]
+            
+            return tasks[:limit]
         except Exception as exc:
             raise CustomException(msg=f"获取最近任务列表失败: {str(exc)}")
 

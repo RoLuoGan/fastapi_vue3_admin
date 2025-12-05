@@ -79,12 +79,12 @@ export interface NginxUpstreamTable {
   id?: number;
   upstream?: string;
   proxy_targets?: ProxyTarget[];
-  nginx_node_id?: number;
-  nginx_node?: {
+  nginx_node_ids?: number[]; // 修改
+  nginx_nodes?: Array<{ // 修改
     id?: number;
     ip?: string;
     port?: number;
-  };
+  }>;
   upstream_template?: string;
   description?: string;
   created_at?: string;
@@ -96,7 +96,7 @@ export interface NginxUpstreamForm {
   id?: number;
   upstream?: string;
   proxy_targets?: ProxyTarget[];
-  nginx_node_id?: number;
+  nginx_node_ids?: number[]; // 修改
   upstream_template?: string;
   description?: string;
 }

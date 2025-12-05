@@ -1,0 +1,82 @@
+---
+- name: 同步 Nginx Upstream 配置
+  hosts: all
+  become: yes
+  vars:
+    nginx_conf_dir: /etc/nginx/conf.d
+    upstream_conf_file: "{{ nginx_conf_dir }}/upstream.conf"
+    backup_suffix: "{{ ansible_date_time.epoch }}"
+  
+  tasks:
+    - name: 检查 Nginx 是否已安装
+      command: which nginx
+      register: nginx_check
+      ignore_errors: yes
+      changed_when: false
+      
+    - name: 检查 Nginx 配置文件目录是否存在
+      file:
+        path: "{{ nginx_conf_dir }}"
+        state: directory
+        mode: '0755'
+      when: nginx_check.rc == 0
+      
+    - name: 备份现有配置文件（如果存在）
+      copy:
+        src: "{{ upstream_conf_file }}"
+        dest: "{{ upstream_conf_file }}.backup.{{ backup_suffix }}"
+        remote_src: yes
+      when: nginx_check.rc == 0
+      ignore_errors: yes
+      changed_when: false
+      
+    - name: 创建/更新 Upstream 配置文件
+      copy:
+        src: "{{ upstream_config_src }}"
+        dest: "{{ upstream_conf_file }}"
+        mode: '0644'
+        owner: root
+        group: root
+        force: yes
+      when: 
+        - nginx_check.rc == 0
+        - upstream_config_src is defined
+      register: copy_result
+      
+    - name: 显示配置文件复制结果
+      debug:
+        msg: "配置文件已复制到 {{ upstream_conf_file }}"
+      when: 
+        - nginx_check.rc == 0
+        - copy_result.changed | default(false)
+      
+    - name: 验证 Nginx 配置语法
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+      when: nginx_check.rc == 0
+      
+    - name: 重载 Nginx 配置
+      systemd:
+        name: nginx
+        state: reloaded
+      when: 
+        - nginx_check.rc == 0
+        - nginx_test.rc == 0
+      ignore_errors: yes
+      
+    - name: 显示同步结果
+      debug:
+        msg: "Nginx Upstream 配置同步完成"
+      when: nginx_check.rc == 0 and nginx_test.rc == 0
+      
+    - name: 显示错误信息
+      debug:
+        msg: "Nginx 配置验证失败，请检查配置文件"
+      when: nginx_check.rc == 0 and nginx_test.rc != 0
+      
+    - name: 显示 Nginx 未安装警告
+      debug:
+        msg: "警告: 目标节点未安装 Nginx，跳过同步"
+      when: nginx_check.rc != 0
+

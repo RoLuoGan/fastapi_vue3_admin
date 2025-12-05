@@ -87,6 +87,12 @@
              <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column prop="endpoint_port" label="服务端口" width="120" align="center">
+          <template #default="{ row }">
+            <span v-if="row.endpoint_port">{{ row.endpoint_port }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.status ? 'success' : 'danger'">
@@ -175,6 +181,12 @@
           <el-descriptions-item label="模块分组">
             {{ serviceDetail?.module_group || "-" }}
           </el-descriptions-item>
+          <el-descriptions-item label="服务端口">
+            {{ serviceDetail?.endpoint_port || "-" }}
+          </el-descriptions-item>
+          <el-descriptions-item label="当前版本号">
+            {{ serviceDetail?.current_package_version || "-" }}
+          </el-descriptions-item>
           <el-descriptions-item label="描述" :span="2">
             {{ serviceDetail?.description || "-" }}
           </el-descriptions-item>
@@ -213,6 +225,17 @@
             <el-select v-model="serviceForm.module_group" placeholder="请选择模块分组" clearable style="width: 100%">
               <el-option v-for="item in moduleGroupOptions" :key="item.dict_value" :label="item.dict_label" :value="item.dict_value" />
             </el-select>
+          </el-form-item>
+          <el-form-item label="服务端口" prop="endpoint_port">
+            <el-input-number
+              v-model="serviceForm.endpoint_port"
+              placeholder="请输入服务端口号(1-65535)"
+              :min="1"
+              :max="65535"
+              :precision="0"
+              style="width: 100%"
+              clearable
+            />
           </el-form-item>
           <el-form-item label="描述" prop="description">
             <el-input
@@ -302,6 +325,7 @@ const serviceForm = reactive<ServiceForm>({
   description: "",
   project: undefined,
   module_group: undefined,
+  endpoint_port: undefined,
 });
 
 const serviceDetail = ref<ServiceTable>();
@@ -318,6 +342,9 @@ const serviceRules: FormRules<ServiceForm> = {
       message: "编码需以字母开头，可包含字母、数字、下划线",
       trigger: "blur",
     },
+  ],
+  endpoint_port: [
+    { type: "number", min: 1, max: 65535, message: "端口号必须在1-65535之间", trigger: "blur" },
   ],
 };
 
@@ -369,6 +396,7 @@ function resetForm() {
   serviceForm.description = "";
   serviceForm.project = undefined;
   serviceForm.module_group = undefined;
+  serviceForm.endpoint_port = undefined;
   (serviceForm as any).nodes = [];
 }
 
@@ -425,6 +453,7 @@ async function handleOpenDialog(type: DialogType, id?: number) {
       serviceForm.description = detail.description || "";
       serviceForm.project = detail.project;
       serviceForm.module_group = detail.module_group;
+      serviceForm.endpoint_port = detail.endpoint_port;
       (serviceForm as any).nodes = detail.nodes?.map((n: any) => n.id) || [];
     }
   } catch (error: any) {

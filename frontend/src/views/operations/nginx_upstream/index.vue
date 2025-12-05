@@ -1,5 +1,8 @@
 <template>
   <div class="operations-nginx-upstream page-root">
+    <div class="flex gap-4">
+      <!-- 左侧内容区域 -->
+      <div class="flex-1">
     <el-card shadow="never" class="search-card">
       <template #header>
         <div class="flex justify-between items-center">
@@ -91,9 +94,20 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="Nginx节点" min-width="140">
+        <el-table-column label="Nginx节点" min-width="180">
           <template #default="{ row }">
-            {{ row.nginx_node?.ip || "-" }}
+            <div v-if="row.nginx_nodes && row.nginx_nodes.length > 0" class="flex flex-wrap gap-1">
+              <el-tag
+                v-for="(node, index) in row.nginx_nodes"
+                :key="index"
+                size="small"
+                type="primary"
+                effect="plain"
+              >
+                {{ node.ip }}
+              </el-tag>
+            </div>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="description" label="描述" min-width="150" show-overflow-tooltip />
@@ -170,8 +184,19 @@
           <el-descriptions-item label="Upstream名称">
             {{ upstreamDetail?.upstream || "-" }}
           </el-descriptions-item>
-          <el-descriptions-item label="Nginx节点">
-            {{ upstreamDetail?.nginx_node?.ip || "-" }}
+          <el-descriptions-item label="Nginx节点" :span="2">
+            <div v-if="upstreamDetail?.nginx_nodes && upstreamDetail.nginx_nodes.length > 0" class="flex flex-wrap gap-2">
+              <el-tag
+                v-for="(node, index) in upstreamDetail.nginx_nodes"
+                :key="index"
+                size="small"
+                type="primary"
+                effect="plain"
+              >
+                {{ node.ip }}:{{ node.port || 22 }}
+              </el-tag>
+            </div>
+            <span v-else>-</span>
           </el-descriptions-item>
           <el-descriptions-item label="代理目标" :span="2">
             <div v-if="upstreamDetail?.proxy_targets && upstreamDetail.proxy_targets.length > 0">
@@ -405,12 +430,69 @@
         </span>
       </template>
     </el-dialog>
+      </div>
+
+      <!-- 右侧任务进度栏 -->
+      <div class="w-80">
+        <el-card>
+          <template #header>
+            <div class="flex justify-between items-center">
+              <span>任务进度</span>
+              <el-button text type="primary" icon="refresh" @click="loadRecentTasks">刷新</el-button>
+            </div>
+          </template>
+          <div class="task-list">
+            <div
+              v-for="task in taskList"
+              :key="task.id"
+              class="task-item"
+              @click="handleOpenTaskDetailFromList(task.id)"
+            >
+              <div class="task-header">
+                <div>
+                  <span class="task-ip">任务 #{{ task.id }}</span>
+                </div>
+                <el-tag size="small" :type="getTaskTypeTag(task.task_type)">
+                  {{ getTaskTypeLabel(task.task_type) }}
+                </el-tag>
+              </div>
+              <div class="task-progress">
+                <el-progress
+                  :percentage="task.progress || 0"
+                  :status="progressStatus(task.task_status)"
+                  :text-inside="true"
+                  :stroke-width="14"
+                />
+              </div>
+              <div class="task-info">
+                <span class="task-time">{{ task.created_at || '-' }}</span>
+                <div class="task-status">
+                  <el-icon v-if="task.task_status === 'success'" class="status-icon success"><CircleCheck /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'partial_success'" class="status-icon partial"><WarningFilled /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'failed'" class="status-icon failed"><CircleClose /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'cancelled'" class="status-icon cancelled"><Close /></el-icon>
+                  <el-icon v-else-if="task.task_status === 'cancelling'" class="status-icon cancelling"><Loading /></el-icon>
+                  <el-icon v-else class="status-icon running"><Loading /></el-icon>
+                  <span class="status-text">{{ getTaskStatusText(task.task_status || 'running') }}</span>
+                </div>
+              </div>
+              <div v-if="task.error_message" class="task-error">{{ task.error_message }}</div>
+            </div>
+            <div v-if="taskList.length === 0" class="empty-tasks">
+              <el-empty :image-size="60" description="暂无任务" />
+            </div>
+          </div>
+        </el-card>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { onMounted, onBeforeUnmount, reactive, ref } from "vue";
+import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
+import { CircleCheck, CircleClose, Loading, WarningFilled, Close } from "@element-plus/icons-vue";
 import NginxUpstreamAPI, {
   type NginxUpstreamForm,
   type NginxUpstreamPageQuery,
@@ -418,7 +500,7 @@ import NginxUpstreamAPI, {
   type ProxyTarget,
   type PreviewTemplateRequest,
 } from "@/api/operations/nginx_upstream";
-import NodeAPI, { type NodeTable, type ServiceTable } from "@/api/operations/node";
+import NodeAPI, { type NodeTable, type ServiceTable, type TaskTable } from "@/api/operations/node";
 
 // 对话框类型
 type DialogType = "create" | "update" | "detail";
@@ -428,6 +510,8 @@ const dialogLoading = ref(false);
 const tableData = ref<NginxUpstreamTable[]>([]);
 const total = ref(0);
 const selectionIds = ref<number[]>([]);
+const taskList = ref<TaskTable[]>([]);
+const router = useRouter();
 
 const nginxNodeOptions = ref<NodeTable[]>([]);
 const serviceOptions = ref<ServiceTable[]>([]);
@@ -622,7 +706,8 @@ function getServiceNodesPreview(serviceId?: number): string {
   if (!service || !service.nodes || service.nodes.length === 0) {
     return "该服务模块没有关联的节点";
   }
-  const nodes = service.nodes.map((node) => `${node.ip}:${node.port || 22}`).join(", ");
+  const endpointPort = service.endpoint_port;
+  const nodes = service.nodes.map((node) => `${node.ip}:${endpointPort || node.port || 22}`).join(", ");
   return `将添加 ${service.nodes.length} 个节点: ${nodes}`;
 }
 
@@ -642,7 +727,7 @@ function handleConfirmAddServiceNodes() {
   }
 
   // 获取服务的 endpoint_port（如果配置了）
-  const endpointPort = (service as any).endpoint_port;
+  const endpointPort = service.endpoint_port;
 
   // 添加服务模块下的所有节点
   service.nodes.forEach((node) => {
@@ -731,8 +816,9 @@ async function handleOpenDialog(type: DialogType, id?: number) {
         ...target,
         status: target.status || "up"
       }));
-      upstreamForm.nginx_node_id = detail.nginx_node_id;
-      (upstreamForm as any).nginx_node_ids = detail.nginx_node_id ? [detail.nginx_node_id] : [];
+      // nginx_node_id = undefined
+      upstreamForm.nginx_node_id = undefined;
+      (upstreamForm as any).nginx_node_ids = detail.nginx_node_ids || [];
       upstreamForm.upstream_template = detail.upstream_template || `upstream {{ service_name }}_upstream {
 {% for host in hosts %}
     server {{ host.ip }}:{{ host.port }}{% if host.status == 'down' %} down{% endif %};
@@ -765,61 +851,22 @@ function handleSubmit() {
     
     dialogLoading.value = true;
     try {
+      const submitData = {
+        ...upstreamForm,
+        nginx_node_ids: nodeIds,
+      };
+      // 移除旧字段
+      delete (submitData as any).nginx_node_id;
+
       if (dialog.type === "create") {
-        // 去重nginx节点ID
-        const uniqueNodeIds = Array.from(new Set(nodeIds));
+        console.log(`[NginxUpstream] 开始创建upstream: ${upstreamForm.upstream}, 节点数量: ${nodeIds.length}`);
         
-        console.log(`[NginxUpstream] 开始创建upstream: ${upstreamForm.upstream}, 节点数量: ${uniqueNodeIds.length}`);
-        
-        // 为每个选中的节点创建一个upstream记录
-        const results = await Promise.allSettled(
-          uniqueNodeIds.map(async (nodeId: number) => {
-            const formData = {
-              ...upstreamForm,
-              nginx_node_id: nodeId,
-            };
-            // 移除nginx_node_ids字段
-            delete (formData as any).nginx_node_ids;
-            
-            console.log(`[NginxUpstream] 创建upstream: ${upstreamForm.upstream}, nginx_node_id: ${nodeId}`);
-            return NginxUpstreamAPI.createUpstream(formData);
-          })
-        );
-        
-        // 统计成功和失败的数量
-        const successCount = results.filter(r => r.status === 'fulfilled').length;
-        const failedCount = results.filter(r => r.status === 'rejected').length;
-        
-        console.log(`[NginxUpstream] 创建完成: 成功=${successCount}, 失败=${failedCount}`);
-        
-        if (failedCount > 0) {
-          // 显示失败的详细信息
-          const failedReasons = results
-            .filter(r => r.status === 'rejected')
-            .map((r: any) => r.reason?.response?.data?.msg || r.reason?.message || '未知错误')
-            .join('; ');
-          
-          if (successCount > 0) {
-            ElMessage.warning(`部分创建成功：${successCount} 个成功，${failedCount} 个失败。失败原因：${failedReasons}`);
-          } else {
-            ElMessage.error(`创建失败：${failedReasons}`);
-          }
-        } else {
-          ElMessage.success(`成功创建 ${successCount} 个Nginx Upstream`);
-        }
-        
-        if (successCount > 0) {
-          dialog.visible = false;
-          loadData();
-        }
+        await NginxUpstreamAPI.createUpstream(submitData);
+        ElMessage.success("创建Nginx Upstream成功");
+        dialog.visible = false;
+        loadData();
       } else if (dialog.targetId) {
-        // 更新时只使用第一个节点（保持原有逻辑）
-        const formData = {
-          ...upstreamForm,
-          nginx_node_id: nodeIds[0],
-        };
-        delete (formData as any).nginx_node_ids;
-        await NginxUpstreamAPI.updateUpstream(dialog.targetId, formData);
+        await NginxUpstreamAPI.updateUpstream(dialog.targetId, submitData);
         ElMessage.success("更新Nginx Upstream成功");
         dialog.visible = false;
         loadData();
@@ -841,6 +888,16 @@ async function handleSync(ids: number[]) {
     await NginxUpstreamAPI.syncUpstream({ upstream_ids: ids });
     ElMessage.success("同步任务已创建");
     loadData();
+    // 刷新任务列表，并启动定时刷新（如果有运行中的任务）
+    setTimeout(async () => {
+      await loadRecentTasks();
+      // 如果有正在运行的任务，启动定时刷新
+      if (hasRunningTasks() && recentTasksTimer === null) {
+        recentTasksTimer = window.setInterval(() => {
+          loadRecentTasks();
+        }, 5000);
+      }
+    }, 2000);
   } catch (error: any) {
     if (error !== "cancel") {
       console.error(error);
@@ -872,8 +929,94 @@ async function handleDelete(ids: number[]) {
   }
 }
 
+// 定时器ID
+let recentTasksTimer: number | null = null;
+
+/**
+ * 停止定时刷新任务列表
+ */
+function stopRecentTasksRefresh() {
+  if (recentTasksTimer !== null) {
+    clearInterval(recentTasksTimer);
+    recentTasksTimer = null;
+  }
+}
+
+/**
+ * 检查是否有正在运行的任务
+ */
+function hasRunningTasks(): boolean {
+  return taskList.value.some(task => task.task_status === "running");
+}
+
+// 加载最近任务（只显示同步任务）
+async function loadRecentTasks() {
+  try {
+    const response = await NodeAPI.getRecentTasks(20, "nginx_upstream_sync");
+    taskList.value = response.data.data || [];
+    
+    // 检查是否有正在运行的任务，如果没有则停止定时刷新
+    if (!hasRunningTasks()) {
+      stopRecentTasksRefresh();
+    }
+  } catch (error: any) {
+    console.error(error);
+  }
+}
+
+// 获取任务状态文本
+function getTaskStatusText(status: string) {
+  const statusMap: Record<string, string> = {
+    running: '执行中',
+    success: '完成',
+    partial_success: '部分成功',
+    failed: '失败',
+    cancelling: '取消中',
+    cancelled: '已取消',
+  };
+  return statusMap[status] || status;
+}
+
+function progressStatus(status?: string) {
+  if (status === 'success') return 'success';
+  if (status === 'partial_success') return 'warning';
+  if (status === 'failed') return 'exception';
+  if (status === 'cancelled') return undefined;
+  if (status === 'cancelling') return 'warning';
+  return undefined;
+}
+
+function getTaskTypeLabel(taskType?: string) {
+  if (taskType === 'nginx_upstream_sync') return '同步';
+  return taskType || '-';
+}
+
+function getTaskTypeTag(taskType?: string) {
+  if (taskType === 'nginx_upstream_sync') return 'warning';
+  return 'info';
+}
+
+function handleOpenTaskDetailFromList(taskId?: number) {
+  if (!taskId) return;
+  router.push({
+    path: `/operations/task/detail/${taskId}`,
+  });
+}
+
 onMounted(() => {
   Promise.all([loadNginxNodeOptions(), loadServiceOptions(), loadData()]);
+  loadRecentTasks();
+  // 如果有正在运行的任务，启动定时刷新
+  if (hasRunningTasks()) {
+    recentTasksTimer = window.setInterval(() => {
+      loadRecentTasks();
+    }, 5000);
+  }
+});
+
+onBeforeUnmount(() => {
+  // 清除定时器，防止页面关闭后继续请求
+  stopRecentTasksRefresh();
 });
 </script>
 
@@ -894,5 +1037,123 @@ onMounted(() => {
 
 .proxy-targets-container {
   width: 100%;
+}
+
+.w-80 {
+  width: 320px;
+  flex-shrink: 0;
+}
+
+.task-list {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.task-item {
+  padding: 12px;
+  margin-bottom: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  background: #f9fafb;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.task-item:hover {
+  border-color: #409eff;
+  background: #f0f9ff;
+}
+
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.task-ip {
+  font-weight: bold;
+  color: #303133;
+}
+
+.task-progress {
+  margin-bottom: 6px;
+}
+
+.task-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.task-time {
+  font-size: 12px;
+  color: #909399;
+}
+
+.task-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-icon {
+  font-size: 16px;
+}
+
+.status-icon.success {
+  color: #67c23a;
+}
+
+.status-icon.partial {
+  color: #e6a23c;
+}
+
+.status-icon.failed {
+  color: #f56c6c;
+}
+
+.status-icon.running {
+  color: #909399;
+  animation: rotate 1s linear infinite;
+}
+
+.status-icon.cancelling {
+  color: #e6a23c;
+  animation: rotate 1s linear infinite;
+}
+
+.status-icon.cancelled {
+  color: #909399;
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.status-text {
+  font-size: 12px;
+  color: #606266;
+}
+
+.task-error {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: #fef0f0;
+  color: #f56c6c;
+  border-radius: 2px;
+  font-size: 12px;
+}
+
+.empty-tasks {
+  text-align: center;
+  padding: 40px 0;
 }
 </style>

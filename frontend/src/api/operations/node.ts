@@ -232,6 +232,7 @@ export interface ServiceTable {
   creator?: creatorType;
   nodes?: NodeTable[];
   current_package_version?: string;
+  endpoint_port?: number;
 }
 
 export interface ServiceForm {
@@ -242,6 +243,7 @@ export interface ServiceForm {
   description?: string;
   project?: string;
   module_group?: string;
+  endpoint_port?: number;
   nodes?: number[];
 }
 
