@@ -373,6 +373,7 @@ class BaseBatchTaskExecutor(ABC):
     ) -> int:
         """
         执行 ansible-playbook。
+        优化：使用临时文件传递 extra_vars，避免 Windows 命令行编码问题。
         """
         playbook_path = Path(playbook)
         if not playbook_path.exists():
@@ -385,10 +386,30 @@ class BaseBatchTaskExecutor(ABC):
             str(playbook_path),
         ]
 
+        # 使用临时文件传递 extra_vars，避免 Windows 命令行 JSON 编码问题
+        extra_vars_file = None
         if extra_vars:
-            cmd += ["--extra-vars", json.dumps(extra_vars, ensure_ascii=False)]
+            try:
+                # 创建临时 JSON 文件
+                extra_vars_file = self.work_dir / f"extra_vars_{self.task_id}_{id(extra_vars)}.json"
+                with open(extra_vars_file, "w", encoding="utf-8") as f:
+                    json.dump(extra_vars, f, ensure_ascii=False, indent=2)
+                cmd += ["--extra-vars", f"@{extra_vars_file}"]
+            except Exception as e:
+                self.write_log(f"[WARN] 创建 extra_vars 临时文件失败，回退到命令行参数: {e}")
+                # 回退到命令行参数方式
+                cmd += ["--extra-vars", json.dumps(extra_vars, ensure_ascii=False)]
+        
         if tags:
             cmd += ["--tags", ",".join(tags)]
 
-        return self.run_command(cmd, env_override=env_override)
+        try:
+            return self.run_command(cmd, env_override=env_override)
+        finally:
+            # 清理临时文件
+            if extra_vars_file and extra_vars_file.exists():
+                try:
+                    extra_vars_file.unlink()
+                except Exception:
+                    pass  # 忽略清理错误
 

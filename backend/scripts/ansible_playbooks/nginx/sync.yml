@@ -32,7 +32,7 @@
       
     - name: 创建/更新 Upstream 配置文件
       copy:
-        src: "{{ upstream_config_src }}"
+        content: "{{ upstream_config_content | default('') }}"
         dest: "{{ upstream_conf_file }}"
         mode: '0644'
         owner: root
@@ -40,12 +40,12 @@
         force: yes
       when: 
         - nginx_check.rc == 0
-        - upstream_config_src is defined
+        - upstream_config_content is defined
       register: copy_result
       
-    - name: 显示配置文件复制结果
+    - name: 显示配置文件更新结果
       debug:
-        msg: "配置文件已复制到 {{ upstream_conf_file }}"
+        msg: "配置文件已更新到 {{ upstream_conf_file }}"
       when: 
         - nginx_check.rc == 0
         - copy_result.changed | default(false)
