@@ -24,38 +24,42 @@ class NginxUpstreamSyncTaskExecutor(BaseBatchTaskExecutor):
         """打印初始化信息"""
         super().print_init_info()
         
-        # 打印节点和upstream信息
+        # 打印upstream和节点信息
         if not self.operator_metas:
             self.write_log("[WARNING] operator_metas 为空")
             self.write_log("=" * 60)
             return
         
-        # 按节点分组统计
-        node_upstreams: Dict[int, List[Dict]] = {}
+        # 统计upstream和节点信息（支持nginx_node_ips数组格式）
+        self.write_log(f"Upstream数量: {len(self.operator_metas)}")
+        total_nodes = 0
+        
         for meta in self.operator_metas:
             if not isinstance(meta, dict):
                 self.write_log(f"[WARNING] meta 不是字典类型: {type(meta)}")
                 continue
             
-            node_id = meta.get("nginx_node_id")
-            if node_id not in node_upstreams:
-                node_upstreams[node_id] = []
-            node_upstreams[node_id].append(meta)
-        
-        self.write_log(f"节点数量: {len(node_upstreams)}")
-        total_upstreams = 0
-        
-        for node_id, upstream_list in node_upstreams.items():
-            node_ip = upstream_list[0].get("nginx_node_ip", "unknown") if upstream_list else "unknown"
-            upstream_count = len(upstream_list)
-            total_upstreams += upstream_count
+            upstream_id = meta.get("upstream_id")
+            upstream_name = meta.get("upstream_name", "unknown")
             
-            self.write_log(f"节点 {node_id} ({node_ip}): {upstream_count} 个upstream")
-            for idx, meta in enumerate(upstream_list, 1):
-                upstream_name = meta.get("upstream_name", "unknown")
-                self.write_log(f"  - [{idx}/{upstream_count}] {upstream_name}")
+            # 支持新的nginx_node_ips数组格式
+            nginx_node_ips = meta.get("nginx_node_ips", [])
+            if nginx_node_ips:
+                # 新格式：nginx_node_ips数组
+                node_count = len(nginx_node_ips)
+                total_nodes += node_count
+                node_ips = [node.get("nginx_node_ip", "unknown") for node in nginx_node_ips]
+                self.write_log(f"Upstream {upstream_id} ({upstream_name}): {node_count} 个节点")
+                self.write_log(f"  - 节点IP: {', '.join(node_ips)}")
+            else:
+                # 兼容旧格式：nginx_node_ip单个节点
+                node_ip = meta.get("nginx_node_ip", "unknown")
+                if node_ip != "unknown":
+                    total_nodes += 1
+                    self.write_log(f"Upstream {upstream_id} ({upstream_name}): 1 个节点")
+                    self.write_log(f"  - 节点IP: {node_ip}")
         
-        self.write_log(f"总upstream数: {total_upstreams}")
+        self.write_log(f"总节点数: {total_nodes}")
         self.write_log("=" * 60)
     
     def _execute_task(self) -> int:
@@ -73,74 +77,90 @@ class NginxUpstreamSyncTaskExecutor(BaseBatchTaskExecutor):
     def _execute_sync(self) -> int:
         """
         同步 Nginx Upstream 配置到节点
-        1. 按节点分组
-        2. 为每个节点生成配置文件
+        1. 处理operator_metas（支持nginx_node_ips数组格式）
+        2. 为每个upstream的所有节点生成配置文件
         3. 使用 Ansible Playbook 同步到节点
         """
-        # 1. 按节点分组
-        node_upstreams: Dict[int, Dict[str, Any]] = {}
+        if not self.operator_metas:
+            self.write_log("[ERROR] 没有有效的同步任务可执行")
+            return 1
+        
+        self.write_log(f"准备同步 {len(self.operator_metas)} 个upstream")
+        
+        # 为每个upstream的所有节点生成配置文件并执行同步
+        final_rc = 0
         for meta in self.operator_metas:
             if not isinstance(meta, dict):
                 self.write_log(f"[WARNING] meta 不是字典类型: {type(meta)}")
                 continue
             
-            node_id = meta.get("nginx_node_id")
-            node_ip = meta.get("nginx_node_ip", "unknown")
-            node_port = meta.get("node_port", 22)  # 默认SSH端口
+            upstream_id = meta.get("upstream_id")
+            upstream_name = meta.get("upstream_name", "unknown")
+            upstream_template = meta.get("upstream_template")
+            template_vars = meta.get("template_vars", {})
             
-            if node_id not in node_upstreams:
-                node_upstreams[node_id] = {
-                    "node_id": node_id,
-                    "node_ip": node_ip,
-                    "node_port": node_port,
-                    "upstreams": []
-                }
+            # 支持新的nginx_node_ips数组格式
+            nginx_node_ips = meta.get("nginx_node_ips", [])
+            if not nginx_node_ips:
+                # 兼容旧格式：nginx_node_ip单个节点
+                node_id = meta.get("nginx_node_id")
+                node_ip = meta.get("nginx_node_ip")
+                node_port = meta.get("node_port", 22)
+                if node_ip:
+                    nginx_node_ips = [{
+                        "nginx_node_id": node_id,
+                        "nginx_node_ip": node_ip,
+                        "node_port": node_port,
+                    }]
+                else:
+                    self.write_log(f"[WARNING] upstream {upstream_name} 没有有效的nginx节点")
+                    continue
             
-            node_upstreams[node_id]["upstreams"].append(meta)
-        
-        if not node_upstreams:
-            self.write_log("[ERROR] 没有有效的同步任务可执行")
-            return 1
-        
-        self.write_log(f"准备同步到 {len(node_upstreams)} 个节点")
-        
-        # 2. 为每个节点生成配置文件并执行同步
-        final_rc = 0
-        for node_id, node_data in node_upstreams.items():
-            node_ip = node_data["node_ip"]
-            node_port = node_data["node_port"]
-            upstreams = node_data["upstreams"]
+            self.write_log(f"处理upstream {upstream_id} ({upstream_name}): {len(nginx_node_ips)} 个节点")
+            node_ips = [node.get("nginx_node_ip", "unknown") for node in nginx_node_ips]
+            self.write_log(f"  节点IP: {', '.join(node_ips)}")
             
-            self.write_log(f"处理节点 {node_id} ({node_ip}:{node_port}): {len(upstreams)} 个upstream")
+            # 构建upstream配置（同一个upstream的所有节点使用相同的配置）
+            upstream_meta = {
+                "upstream_name": upstream_name,
+                "upstream_template": upstream_template,
+                "template_vars": template_vars,
+            }
             
+            # 生成配置文件（同一个upstream的所有节点使用相同的配置内容）
             try:
-                # 生成配置文件
-                config_content = self._generate_nginx_config(upstreams)
-                config_file = self.work_dir / f"nginx_upstream_{node_id}.conf"
+                config_content = self._generate_nginx_config([upstream_meta])
+                config_file = self.work_dir / f"nginx_upstream_{upstream_id}.conf"
                 config_file.write_text(config_content, encoding="utf-8")
                 self.write_log(f"已生成配置文件: {config_file}")
                 
-                # 构建 ansible vars
+                # 构建包含所有节点的inventory（同一个upstream的所有节点合并到一个inventory）
+                inventory_nodes = []
+                for node_info in nginx_node_ips:
+                    node_ip = node_info.get("nginx_node_ip", "unknown")
+                    node_port = node_info.get("node_port", 22)
+                    inventory_nodes.append({
+                        "ip": node_ip,
+                        "port": node_port,
+                    })
+                
+                # 构建 meta 用于生成 inventory（包含所有节点）
+                inventory_meta = {
+                    "service_name": f"nginx_upstream_{upstream_id}",
+                    "nodes": inventory_nodes,
+                }
+                
+                # 生成 inventory（同一个upstream的所有节点合并到一个inventory文件）
+                inventory_path = self.work_dir / f"inventory_nginx_upstream_{upstream_id}.ini"
+                self._generate_single_node_inventory(inventory_meta, inventory_path)
+                
+                # 构建 ansible vars（同一个upstream的所有节点使用相同的配置）
                 ansible_vars = {
-                    "nginx_node_ip": node_ip,
                     "upstream_config_file": str(config_file),
                     "upstream_config_content": config_content,
                 }
                 
-                # 构建 meta 用于生成 inventory
-                inventory_meta = {
-                    "service_name": f"nginx_node_{node_id}",
-                    "nodes": [{
-                        "ip": node_ip,
-                        "port": node_port,
-                    }],
-                }
-                
-                # 生成 inventory
-                inventory_path = self.work_dir / f"inventory_nginx_{node_id}.ini"
-                self._generate_single_node_inventory(inventory_meta, inventory_path)
-                
-                # 执行 playbook
+                # 执行 playbook（一次性同步到所有节点）
                 playbook_path = Path(__file__).parent / "ansible_playbooks" / "nginx" / "sync.yml"
                 
                 if not playbook_path.exists():
@@ -148,7 +168,9 @@ class NginxUpstreamSyncTaskExecutor(BaseBatchTaskExecutor):
                     final_rc = 1
                     continue
                 
-                self.write_log(f"执行 Playbook: {playbook_path} -> 节点: {node_ip}")
+                self.write_log(f"执行 Playbook: {playbook_path} -> upstream: {upstream_name}, 节点数: {len(nginx_node_ips)}")
+                node_ips_str = ", ".join([node.get("nginx_node_ip", "unknown") for node in nginx_node_ips])
+                self.write_log(f"  目标节点: {node_ips_str}")
                 
                 rc = self.run_ansible_playbook(
                     playbook=playbook_path,
@@ -158,12 +180,12 @@ class NginxUpstreamSyncTaskExecutor(BaseBatchTaskExecutor):
                 
                 if rc != 0:
                     final_rc = rc
-                    self.write_log(f"[ERROR] 节点 {node_ip} 同步失败，返回码: {rc}")
+                    self.write_log(f"[ERROR] upstream {upstream_name} 同步失败，返回码: {rc}")
                 else:
-                    self.write_log(f"[SUCCESS] 节点 {node_ip} 同步成功")
-                    
+                    self.write_log(f"[SUCCESS] upstream {upstream_name} 同步成功，已同步到 {len(nginx_node_ips)} 个节点")
+                        
             except Exception as e:
-                self.write_log(f"[ERROR] 处理节点 {node_ip} 失败: {e}")
+                self.write_log(f"[ERROR] 处理upstream {upstream_name} 失败: {e}")
                 import traceback
                 self.write_log(f"[ERROR] 异常堆栈:\n{traceback.format_exc()}")
                 final_rc = 1

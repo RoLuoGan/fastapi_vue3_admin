@@ -210,54 +210,58 @@ class NginxUpstreamService:
             upstreams.append(upstream)
             logger.debug(f"[NginxUpstream] 获取到upstream: id={upstream.id}, name={upstream.upstream}")
 
-        # 按nginx节点分组
-        node_upstreams: Dict[int, List] = {}
+        # 按upstream分组，同一个upstream的所有节点合并处理
+        # 构建任务元数据（每个upstream生成一个operator_meta，包含所有节点）
+        operator_metas = []
         for upstream in upstreams:
             # 遍历该upstream关联的所有节点
             if not upstream.nginx_nodes:
+                logger.warning(f"[NginxUpstream] upstream {upstream.upstream} 没有关联的nginx节点")
                 continue
+            
+            # 解析proxy_targets（同一个upstream的所有节点使用相同的配置）
+            proxy_targets = json.loads(upstream.proxy_targets) if isinstance(upstream.proxy_targets, str) else upstream.proxy_targets
+
+            # 准备模板变量（同一个upstream的所有节点使用相同的模板变量）
+            template_vars = {
+                "service_name": upstream.upstream.replace("_upstream", "").replace("-upstream", ""),
+                "hosts": proxy_targets,
+            }
+
+            logger.info(f"[NginxUpstream] 处理upstream: id={upstream.id}, name={upstream.upstream}, 节点数量={len(upstream.nginx_nodes)}")
+
+            # 收集该upstream的所有节点信息
+            nginx_node_ips = []
             for node in upstream.nginx_nodes:
                 node_id = node.id
-                if node_id not in node_upstreams:
-                    node_upstreams[node_id] = []
-                node_upstreams[node_id].append(upstream)
-
-        logger.info(f"[NginxUpstream] 按节点分组完成: {len(node_upstreams)} 个节点")
-
-        # 构建任务元数据（每个upstream+node组合生成一个operator_meta）
-        operator_metas = []
-        for node_id, node_upstream_list in node_upstreams.items():
-            # 获取nginx节点信息
-            nginx_node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
-            if not nginx_node:
-                logger.warning(f"[NginxUpstream] nginx节点不存在: {node_id}")
-                continue
-
-            logger.info(f"[NginxUpstream] 处理节点: id={node_id}, ip={nginx_node.ip}, upstream数量={len(node_upstream_list)}")
-
-            # 为每个upstream生成配置
-            for upstream in node_upstream_list:
-                # 解析proxy_targets
-                proxy_targets = json.loads(upstream.proxy_targets) if isinstance(upstream.proxy_targets, str) else upstream.proxy_targets
-
-                # 准备模板变量
-                template_vars = {
-                    "service_name": upstream.upstream.replace("_upstream", "").replace("-upstream", ""),
-                    "hosts": proxy_targets,
-                }
-
-                operator_meta = {
+                # 获取nginx节点信息
+                nginx_node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
+                if not nginx_node:
+                    logger.warning(f"[NginxUpstream] nginx节点不存在: {node_id}")
+                    continue
+                
+                nginx_node_ips.append({
                     "nginx_node_id": node_id,
                     "nginx_node_ip": nginx_node.ip,
-                    "node_port": nginx_node.port or 22,  # 添加节点端口信息
-                    "upstream_id": upstream.id,
-                    "upstream_name": upstream.upstream,
-                    "upstream_template": upstream.upstream_template,
-                    "template_vars": template_vars,
-                }
-                
-                operator_metas.append(operator_meta)
-                logger.debug(f"[NginxUpstream] 添加operator_meta: upstream={upstream.upstream}, node={nginx_node.ip}")
+                    "node_port": nginx_node.port or 22,
+                })
+                logger.debug(f"[NginxUpstream] 添加节点: upstream={upstream.upstream}, node={nginx_node.ip}")
+
+            if not nginx_node_ips:
+                logger.warning(f"[NginxUpstream] upstream {upstream.upstream} 没有有效的nginx节点")
+                continue
+
+            # 同一个upstream的所有节点合并到一个operator_meta中
+            operator_meta = {
+                "upstream_id": upstream.id,
+                "upstream_name": upstream.upstream,
+                "upstream_template": upstream.upstream_template,
+                "template_vars": template_vars,
+                "nginx_node_ips": nginx_node_ips,  # 使用数组存储多个节点
+            }
+            
+            operator_metas.append(operator_meta)
+            logger.info(f"[NginxUpstream] 添加operator_meta: upstream={upstream.upstream}, 节点数={len(nginx_node_ips)}")
 
         logger.info(f"[NginxUpstream] 生成operator_metas数量: {len(operator_metas)}")
         
