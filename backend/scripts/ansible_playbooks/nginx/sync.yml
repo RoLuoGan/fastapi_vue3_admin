@@ -1,10 +1,9 @@
 ---
-- name: 同步 Nginx Upstream 配置
+- name: 批量同步 Nginx Upstream 配置
   hosts: all
   become: yes
   vars:
-    nginx_conf_dir: /etc/nginx/conf.d
-    upstream_conf_file: "{{ nginx_conf_dir }}/upstream.conf"
+    target_conf_dir: /etc/nginx/conf.d/avaliable-streams
     backup_suffix: "{{ ansible_date_time.epoch }}"
   
   tasks:
@@ -16,39 +15,62 @@
       
     - name: 检查 Nginx 配置文件目录是否存在
       file:
-        path: "{{ nginx_conf_dir }}"
+        path: "{{ target_conf_dir }}"
         state: directory
         mode: '0755'
       when: nginx_check.rc == 0
       
-    - name: 备份现有配置文件（如果存在）
-      copy:
-        src: "{{ upstream_conf_file }}"
-        dest: "{{ upstream_conf_file }}.backup.{{ backup_suffix }}"
-        remote_src: yes
+    - name: 备份现有upstream配置文件（如果存在）
+      shell: |
+        if [ -d "{{ target_conf_dir }}/upstream_backup" ]; then
+          rm -rf "{{ target_conf_dir }}/upstream_backup"
+        fi
+        mkdir -p "{{ target_conf_dir }}/upstream_backup"
+        find "{{ target_conf_dir }}" -maxdepth 1 -name "*.config" -exec cp {} "{{ target_conf_dir }}/upstream_backup/" \;
       when: nginx_check.rc == 0
       ignore_errors: yes
       changed_when: false
       
-    - name: 创建/更新 Upstream 配置文件
+    - name: 查找节点配置目录下的所有配置文件
+      find:
+        paths: "{{ nginx_conf_dir | default('') }}"
+        patterns: "*.config"
+        file_type: file
+      when: 
+        - nginx_check.rc == 0
+        - nginx_conf_dir is defined
+      register: upstream_config_files
+      delegate_to: localhost
+      become: no
+      
+    - name: 批量复制 Upstream 配置文件到目标节点
       copy:
-        content: "{{ upstream_config_content | default('') }}"
-        dest: "{{ upstream_conf_file }}"
+        src: "{{ item.path }}"
+        dest: "{{ target_conf_dir }}/{{ item.path | basename }}"
         mode: '0644'
         owner: root
         group: root
         force: yes
       when: 
         - nginx_check.rc == 0
-        - upstream_config_content is defined
+        - nginx_conf_dir is defined
+        - upstream_config_files.files | default([]) | length > 0
+      loop: "{{ upstream_config_files.files | default([]) }}"
       register: copy_result
       
-    - name: 显示配置文件更新结果
+    - name: 显示同步的配置文件列表
+      shell: ls -1 "{{ target_conf_dir }}/*.config" 2>/dev/null | wc -l
+      register: config_count
+      changed_when: false
+      when: nginx_check.rc == 0
+      
+    - name: 显示配置文件同步结果
       debug:
-        msg: "配置文件已更新到 {{ upstream_conf_file }}"
+        msg: "已从 {{ nginx_conf_dir }} 同步 {{ config_count.stdout | default('0') }} 个upstream配置文件到 {{ target_conf_dir }}"
       when: 
         - nginx_check.rc == 0
-        - copy_result.changed | default(false)
+        - copy_result is defined
+        - copy_result.results | default([]) | length > 0
       
     - name: 验证 Nginx 配置语法
       command: nginx -t
@@ -67,7 +89,7 @@
       
     - name: 显示同步结果
       debug:
-        msg: "Nginx Upstream 配置同步完成"
+        msg: "Nginx Upstream 配置批量同步完成"
       when: nginx_check.rc == 0 and nginx_test.rc == 0
       
     - name: 显示错误信息

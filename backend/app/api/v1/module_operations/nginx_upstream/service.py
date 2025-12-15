@@ -239,7 +239,7 @@ class NginxUpstreamService:
                 if not nginx_node:
                     logger.warning(f"[NginxUpstream] nginx节点不存在: {node_id}")
                     continue
-                
+
                 nginx_node_ips.append({
                     "nginx_node_id": node_id,
                     "nginx_node_ip": nginx_node.ip,
