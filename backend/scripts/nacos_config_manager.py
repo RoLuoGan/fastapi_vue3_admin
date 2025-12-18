@@ -54,13 +54,92 @@ class NacosConfigManager:
         if ":" not in server_addr:
             server_addr = f"{server_addr}:8848"
         
-        # 构建基础URL
-        self.base_url = f"http://{server_addr}/nacos/v3/admin/cs"
+        # 构建基础URL（使用 Open API 而不是 Admin API）
+        self.base_url = f"http://{server_addr}/nacos/v1/cs"
+        self.admin_base_url = f"http://{server_addr}/nacos/v3/admin/cs"
         
-        # 认证信息
+        # 认证信息（Open API 使用 query 参数，Admin API 使用 Basic Auth）
         self.auth = None
         if username and password:
             self.auth = (username, password)
+            self.username_param = username
+            self.password_param = password
+        else:
+            self.username_param = None
+            self.password_param = None
+        
+        # accessToken 缓存（用于 Admin API）
+        self._access_token: Optional[str] = None
+    
+    @staticmethod
+    def _encode_data_id(path: str) -> str:
+        """
+        将文件路径编码为 Nacos 支持的 dataId 格式
+        Nacos dataId 不支持路径分隔符，将 / 替换为 __ (双下划线)
+        
+        Args:
+            path: 文件路径，如 "java/deploy.yml"
+        
+        Returns:
+            编码后的 dataId，如 "java__deploy.yml"
+        """
+        return path.replace("/", "__").replace("\\", "__")
+    
+    @staticmethod
+    def _decode_data_id(data_id: str) -> str:
+        """
+        将 Nacos dataId 解码为文件路径格式
+        将 __ (双下划线) 还原为 /
+        
+        Args:
+            data_id: Nacos dataId，如 "java__deploy.yml"
+        
+        Returns:
+            解码后的路径，如 "java/deploy.yml"
+        """
+        return data_id.replace("__", "/")
+    
+    async def _get_access_token(self) -> Optional[str]:
+        """
+        获取 accessToken（用于 Admin API 认证）
+        
+        Returns:
+            accessToken 字符串，如果获取失败返回 None
+        """
+        if self._access_token:
+            return self._access_token
+        
+        if not self.username_param or not self.password_param:
+            return None
+        
+        # 使用 Open API 登录接口获取 accessToken
+        server_addr = self.server_addresses.split(",")[0].strip()
+        if ":" not in server_addr:
+            server_addr = f"{server_addr}:8848"
+        url = f"http://{server_addr}/nacos/v1/auth/login"
+        params = {
+            "username": self.username_param,
+            "password": self.password_param,
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, params=params)
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    if result.get("accessToken"):
+                        self._access_token = result["accessToken"]
+                        return self._access_token
+                    else:
+                        console.print(f"[yellow]获取 accessToken 失败: {result.get('message', '未知错误')}[/yellow]")
+                        return None
+                else:
+                    console.print(f"[yellow]登录失败: HTTP {response.status_code}, {response.text[:200]}[/yellow]")
+                    return None
+        except Exception as e:
+            console.print(f"[yellow]获取 accessToken 异常: {e}[/yellow]")
+            return None
     
     async def _get_config(
         self,
@@ -69,36 +148,41 @@ class NacosConfigManager:
         namespace: Optional[str] = None,
     ) -> Optional[str]:
         """
-        获取配置内容
+        获取配置内容（使用 Open API）
         
         Args:
             data_id: 配置ID
             group: 配置组名
-            namespace: 命名空间ID
+            namespace: 命名空间ID（Open API 中使用 tenant 参数）
         
         Returns:
             配置内容，如果不存在返回None
         """
         namespace = namespace or self.namespace
+        if namespace == "public":
+            namespace = ""  # Open API 中 public 命名空间使用空字符串
         
-        url = f"{self.base_url}/config"
+        url = f"{self.base_url}/configs"
         params = {
             "dataId": data_id,
-            "groupName": group,
-            "namespaceId": namespace,
+            "group": group,
+            "tenant": namespace if namespace else "",
         }
+        
+        # Open API 使用 query 参数传递用户名密码
+        if self.username_param and self.password_param:
+            params["username"] = self.username_param
+            params["password"] = self.password_param
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, params=params, auth=self.auth)
+                response = await client.get(url, params=params)
                 
                 if response.status_code == 200:
-                    result = response.json()
-                    if result.get("code") == 0 and result.get("data"):
-                        return result["data"].get("content")
-                    elif result.get("code") != 0:
-                        # 配置不存在或其他错误
-                        return None
+                    # Open API 直接返回配置内容（字符串），不是 JSON
+                    content = response.text
+                    if content:
+                        return content
                     return None
                 elif response.status_code == 404:
                     return None
@@ -117,38 +201,49 @@ class NacosConfigManager:
         namespace: Optional[str] = None,
     ) -> bool:
         """
-        发布配置
+        发布配置（使用 Open API）
         
         Args:
             data_id: 配置ID
             group: 配置组名
             content: 配置内容
-            namespace: 命名空间ID
+            namespace: 命名空间ID（Open API 中使用 tenant 参数）
         
         Returns:
             是否成功
         """
         namespace = namespace or self.namespace
+        if namespace == "public":
+            namespace = ""  # Open API 中 public 命名空间使用空字符串
         
-        url = f"{self.base_url}/config"
-        data = {
+        url = f"{self.base_url}/configs"
+        params = {
             "dataId": data_id,
-            "groupName": group,
-            "namespaceId": namespace,
+            "group": group,
+            "tenant": namespace if namespace else "",
+        }
+        
+        # Open API 使用 query 参数传递用户名密码
+        if self.username_param and self.password_param:
+            params["username"] = self.username_param
+            params["password"] = self.password_param
+        
+        # content 作为 form 数据发送
+        data = {
             "content": content,
         }
         
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(url, data=data, auth=self.auth)
+                response = await client.post(url, params=params, data=data)
                 
                 if response.status_code == 200:
-                    result = response.json()
-                    if result.get("code") == 0 and result.get("data") is True:
+                    # Open API 返回 "true" 字符串表示成功
+                    result_text = response.text.strip()
+                    if result_text == "true" or result_text.lower() == "true":
                         return True
                     else:
-                        error_msg = result.get("message", "未知错误")
-                        raise Exception(f"发布配置失败: {error_msg}")
+                        raise Exception(f"发布配置失败: {result_text}")
                 else:
                     error_text = response.text[:500]
                     raise Exception(f"HTTP {response.status_code}: {error_text}")
@@ -163,7 +258,7 @@ class NacosConfigManager:
         page_size: int = 1000,
     ) -> List[tuple]:
         """
-        获取配置列表
+        获取配置列表（使用 Admin API，需要 accessToken）
         
         Args:
             group: 配置组名（可选）
@@ -176,7 +271,12 @@ class NacosConfigManager:
         """
         namespace = namespace or self.namespace
         
-        url = f"{self.base_url}/config/list"
+        # 获取 accessToken
+        access_token = await self._get_access_token()
+        if not access_token:
+            console.print("[yellow]无法获取 accessToken，列表查询可能需要管理员权限[/yellow]")
+        
+        url = f"{self.admin_base_url}/config/list"
         params = {
             "pageNo": page_no,
             "pageSize": page_size,
@@ -186,10 +286,15 @@ class NacosConfigManager:
         if group:
             params["groupName"] = group
         
+        # 构建请求头，使用 accessToken
+        headers = {}
+        if access_token:
+            headers["accessToken"] = access_token
+        
         configs = []
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, params=params, auth=self.auth)
+                response = await client.get(url, params=params, headers=headers)
                 
                 if response.status_code == 200:
                     result = response.json()
@@ -284,23 +389,25 @@ class NacosConfigManager:
 
                     # 确定data_id：使用相对路径，避免不同目录同名覆盖
                     rel_path = config_file.relative_to(config_dir)
-                    data_id = rel_path.as_posix()
+                    original_data_id = rel_path.as_posix()
+                    # 编码 data_id（将路径分隔符替换为双下划线）
+                    encoded_data_id = self._encode_data_id(original_data_id)
                     
                     # 读取文件内容
                     content = config_file.read_text(encoding="utf-8")
 
-                    # 打印上传配置信息
-                    console.print(f"[cyan]上传配置: {data_id} (group: {file_group})[/cyan]")
+                    # 打印上传配置信息（显示原始路径）
+                    console.print(f"[cyan]上传配置: {original_data_id} (group: {file_group})[/cyan]")
                     
                     # 检查是否已存在（增量上传模式）
                     if incremental:
                         existing_content = await self._get_config(
-                            data_id=data_id,
+                            data_id=encoded_data_id,
                             group=file_group,
                             namespace=namespace,
                         )
                         if existing_content is not None:
-                            console.print(f"[yellow]配置已存在: {data_id} (group: {file_group})[/yellow]")
+                            console.print(f"[yellow]配置已存在: {original_data_id} (group: {file_group})[/yellow]")
                             stats["skipped"] += 1
                             progress.update(task, advance=1)
                             continue
@@ -308,36 +415,38 @@ class NacosConfigManager:
                     # 检查是否已存在（非覆盖模式）
                     if not overwrite and not incremental:
                         existing_content = await self._get_config(
-                            data_id=data_id,
+                            data_id=encoded_data_id,
                             group=file_group,
                             namespace=namespace,
                         )
                         if existing_content is not None:
-                            console.print(f"[yellow]配置已存在: {data_id} (group: {file_group})[/yellow]")
+                            console.print(f"[yellow]配置已存在: {original_data_id} (group: {file_group})[/yellow]")
                             stats["skipped"] += 1
                             progress.update(task, advance=1)
                             continue
                     
                     # 发布配置
                     await self._publish_config(
-                        data_id=data_id,
+                        data_id=encoded_data_id,
                         group=file_group,
                         content=content,
                         namespace=namespace,
                     )
                     
-                    console.print(f"[green]上传成功: {data_id} (group: {file_group})[/green]")
+                    console.print(f"[green]上传成功: {original_data_id} (group: {file_group})[/green]")
                     
                     stats["success"] += 1
                     progress.update(
                         task,
                         advance=1,
-                        description=f"已上传: {data_id} (group: {file_group})"
+                        description=f"已上传: {original_data_id} (group: {file_group})"
                     )
                     
                 except Exception as e:
                     error_msg = f"{type(e).__name__}: {str(e)}"
-                    console.print(f"[red]上传失败: {data_id} (group: {file_group})[/red]: {error_msg}")
+                    # 使用原始路径显示错误
+                    original_path = str(config_file.relative_to(config_dir))
+                    console.print(f"[red]上传失败: {original_path} (group: {file_group})[/red]: {error_msg}")
 
                     stats["failed"] += 1
                     failed_files.append((str(config_file), error_msg))
@@ -387,7 +496,9 @@ class NacosConfigManager:
         try:
             # 如果指定了data_id，直接下载单个配置
             if data_id:
-                configs_to_download = [(data_id, group or "DEFAULT_GROUP")]
+                # 如果用户输入的是路径格式，需要编码
+                encoded_data_id = self._encode_data_id(data_id)
+                configs_to_download = [(encoded_data_id, group or "DEFAULT_GROUP")]
                 console.print(f"[cyan]直接下载指定配置: {data_id} (group: {group or 'DEFAULT_GROUP'})[/cyan]")
             else:
                 # 获取配置列表
@@ -420,30 +531,29 @@ class NacosConfigManager:
                 
                 for data_id_item, group_item in configs_to_download:
                     try:
+                        # 解码 data_id（还原路径分隔符）
+                        decoded_data_id = self._decode_data_id(data_id_item)
+                        
                         # 获取配置内容
-                        console.print(f"[cyan]正在下载: {data_id_item} (group: {group_item})[/cyan]")
+                        console.print(f"[cyan]正在下载: {decoded_data_id} (group: {group_item})[/cyan]")
                         
                         content = await self._get_config(
-                            data_id=data_id_item,
+                            data_id=data_id_item,  # 使用编码后的 data_id 查询
                             group=group_item,
                             namespace=namespace,
                         )
                         
                         if content is None:
-                            console.print(f"[yellow]配置内容为空或不存在: {data_id_item} (group: {group_item})[/yellow]")
+                            console.print(f"[yellow]配置内容为空或不存在: {decoded_data_id} (group: {group_item})[/yellow]")
                             stats["skipped"] += 1
                             progress.update(task, advance=1)
                             continue
                         
-                        # 确定输出文件路径（保持相对路径结构）
-                        # 如果data_id包含路径分隔符，保持目录结构
-                        if "/" in data_id_item or "\\" in data_id_item:
-                            # data_id本身就是路径，直接使用
-                            output_file = output_dir / data_id_item
-                        elif group_item and group_item != "DEFAULT_GROUP":
-                            output_file = output_dir / group_item / data_id_item
+                        # 确定输出文件路径（使用 group 作为父目录，然后是解码后的路径）
+                        if group_item and group_item != "DEFAULT_GROUP":
+                            output_file = output_dir / group_item / decoded_data_id
                         else:
-                            output_file = output_dir / data_id_item
+                            output_file = output_dir / decoded_data_id
                         
                         # 检查文件是否存在
                         if output_file.exists() and not overwrite:
@@ -456,17 +566,22 @@ class NacosConfigManager:
                         output_file.parent.mkdir(parents=True, exist_ok=True)
                         output_file.write_text(content, encoding="utf-8")
                         
-                        console.print(f"[green]成功下载: {data_id_item} -> {output_file}[/green]")
+                        console.print(f"[green]成功下载: {decoded_data_id} -> {output_file}[/green]")
                         stats["success"] += 1
                         progress.update(
                             task,
                             advance=1,
-                            description=f"已下载: {data_id_item} (group: {group_item})"
+                            description=f"已下载: {decoded_data_id} (group: {group_item})"
                         )
                         
                     except Exception as e:
                         error_msg = f"{type(e).__name__}: {str(e)}"
-                        console.print(f"[red]下载失败: {data_id_item} (group: {group_item})[/red]")
+                        # 尝试解码显示，如果失败则显示原始 data_id
+                        try:
+                            display_name = self._decode_data_id(data_id_item)
+                        except:
+                            display_name = data_id_item
+                        console.print(f"[red]下载失败: {display_name} (group: {group_item})[/red]")
                         console.print(f"[red]错误详情: {error_msg}[/red]")
                         
                         # 记录详细错误信息
@@ -475,7 +590,7 @@ class NacosConfigManager:
                         console.print(f"[red]错误堆栈:\n{error_detail}[/red]")
                         
                         stats["failed"] += 1
-                        failed_configs.append((data_id_item, group_item, error_msg))
+                        failed_configs.append((display_name, group_item, error_msg))
                         progress.update(
                             task,
                             advance=1,
