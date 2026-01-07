@@ -93,13 +93,14 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
         从 OSS 下载版本包并通过 Ansible Playbook 分发与执行。
         根据 service_type 分组执行不同的 playbook。
         """
-        back_date = datetime.now().strftime("%m%d")
+        back_date = datetime.now().strftime("%Y%m%d")
+        back_suffix = datetime.now().strftime("%Y%m%d%H%M%S")
         
         # 1. 准备阶段：按模块类型 (service_type) 分组任务
         # 结构: { "java": [meta1, meta2], "nginx": [meta3], "default": [meta4] }
         grouped_metas: Dict[str, List[Dict[str, Any]]] = {}
         
-        # 预处理并下载文件
+        # 预处理：下载文件并生成下载URL
         for meta in self.operator_metas:
             package_key = meta.get("package_path")
             if not package_key:
@@ -107,7 +108,12 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
                 continue
             
             try:
-                local_pkg = self.download_oss_object(package_key)                
+                # 下载文件到本地（保留用于备份或其他用途）
+                local_pkg = self.download_oss_object(package_key)
+                
+                # 生成 OSS 预签名下载 URL（有效期2小时）
+                package_download_url = self.get_oss_download_url(package_key, expires=7200)
+                
                 # 获取模块类型，默认为 'default'
                 # 优先从 meta 中获取，也可以尝试根据 service_name 或其他字段推断
                 service_type = meta.get("module_group") or "default"
@@ -128,7 +134,9 @@ class NodeOperatorTaskExecutor(BaseBatchTaskExecutor):
                 new_meta["ansible_vars"] = {
                     "service_name": meta.get("service_name"),
                     "local_pkg_path": str(local_pkg),
+                    "package_url": package_download_url,
                     "back_date": back_date,
+                    "back_suffix": back_suffix
                 }
                 
                 if service_type_key not in grouped_metas:

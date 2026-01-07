@@ -11,13 +11,28 @@
       become: true
 
     - name: mv lib --> {{ service_name }}_{{ back_date }}_lib
-      shell: mv /data/service/{{ service_name }}/lib /data/service/bak/{{ back_date }}/{{ service_name }}_{{ back_date }}_lib
+      shell: mv /data/service/{{ service_name }}/lib /data/service/bak/{{ back_date }}/{{ service_name }}_{{ back_suffix }}_lib
       become: true
 
-    - name: unarchive package to remote
+    - name: Download package from OSS
+      get_url:
+        url: "{{ package_url }}"
+        dest: "/tmp/{{ service_name }}_package.tar.gz"
+        mode: '0644'
+        timeout: 300
+      become: true
+
+    - name: Unarchive package to remote
       unarchive:
-        src: "{{ local_pkg_path }}"
+        src: "/tmp/{{ service_name }}_package.tar.gz"
         dest: "/data/service/{{ service_name }}"
+        remote_src: yes
+      become: true
+    
+    - name: Clean up downloaded package
+      file:
+        path: "/tmp/{{ service_name }}_package.tar.gz"
+        state: absent
       become: true
       
     - name: Execute restart command

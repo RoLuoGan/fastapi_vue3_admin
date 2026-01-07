@@ -237,6 +237,23 @@ class BaseBatchTaskExecutor(ABC):
             f.write(result.read())
         self.write_log(f"[OSS] 下载完成，大小: {filename.stat().st_size} 字节")
         return filename
+    
+    def get_oss_download_url(self, object_key: str, *, expires: int = 3600) -> str:
+        """
+        生成 OSS 对象的预签名下载 URL。
+        
+        Args:
+            object_key: OSS 对象键
+            expires: URL 有效期（秒），默认 3600 秒（1小时）
+            
+        Returns:
+            str: 预签名下载 URL
+        """
+        key = object_key.lstrip("/")
+        bucket = self._get_oss_bucket()
+        url = bucket.sign_url('GET', key, expires)
+        self.write_log(f"[OSS] 生成下载URL: {url} (有效期: {expires}秒)")
+        return url
 
     # ------------------------------------------------------------------
     # Ansible辅助能力

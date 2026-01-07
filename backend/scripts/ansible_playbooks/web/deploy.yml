@@ -11,7 +11,7 @@
       become: true
 
     - name: mv old {{ service_name }} to bak/{{ back_date }}
-      shell: mv /data/service/web/{{ service_name }} /data/service/bak/{{ back_date }}/{{ service_name }}_{{ back_date }}
+      shell: mv /data/service/web/{{ service_name }} /data/service/bak/{{ back_date }}/{{ service_name }}_{{ back_suffix }}
       become: true
 
     - name: unarchive package to remote

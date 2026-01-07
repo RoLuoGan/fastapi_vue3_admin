@@ -119,9 +119,21 @@
                 <span v-else>{{ scope.row.ip }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="端口" prop="port" min-width="80">
+            <el-table-column label="ssh端口" prop="port" min-width="80">
               <template #default="scope">
                 <span v-if="!scope.row.nodes">{{ scope.row.port || '-' }}</span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="服务端口" prop="endpoint_port" min-width="100">
+              <template #default="scope">
+                <span v-if="scope.row.nodes">{{ scope.row.endpoint_port ?? '-' }}</span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="当前模块软件包版本号" prop="current_package_version" min-width="180">
+              <template #default="scope">
+                <span v-if="scope.row.nodes">{{ scope.row.current_package_version || '-' }}</span>
                 <span v-else>-</span>
               </template>
             </el-table-column>
