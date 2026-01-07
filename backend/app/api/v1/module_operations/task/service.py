@@ -186,6 +186,7 @@ class TaskService:
         task_type: str,
         operator_type: str,
         operator_metas: List[Dict[str, Any]],
+        timeout: int = 3600,
         redis: Optional[Redis] = None,
     ) -> Dict:
         """
@@ -196,6 +197,7 @@ class TaskService:
         - task_type: 任务类型 (node_operator, server_operator 等)
         - operator_type: 操作类型 (deploy, restart, init 等)
         - operator_metas: 操作元数据列表（任意结构，由客户端自定义，不做加工直接透传）
+        - timeout: 任务超时时间（秒），默认3600秒（1小时）
         - redis: Redis 连接（可选）
         
         返回:
@@ -228,6 +230,7 @@ class TaskService:
                 task_type=task_type,
                 operator_type=operator_type,
                 operator_metas=operator_metas,  # 直接透传，不做加工
+                timeout=timeout,
                 redis=redis,
             )
         )

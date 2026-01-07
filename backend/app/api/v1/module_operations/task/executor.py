@@ -133,6 +133,7 @@ class TaskExecutor:
         task_type: str,
         operator_type: str,
         operator_metas: Optional[List[dict]] = None,
+        timeout: int = 3600,
         redis: Optional[Redis] = None,
     ) -> None:
         """
@@ -145,6 +146,7 @@ class TaskExecutor:
             task_type: 任务类型 (node_operator, server_operator 等)
             operator_type: 操作类型 (deploy, restart, init 等)
             operator_metas: 操作元数据（任意结构，直接透传）
+            timeout: 任务超时时间（秒），默认3600秒（1小时）
             redis: 复用的 Redis 连接（可选，通过依赖注入获取）
         """
         async with AsyncSessionLocal() as new_db:
@@ -347,20 +349,50 @@ class TaskExecutor:
                         progress_handler=progress_handler,
                     )
                 
-                # 创建脚本执行任务，支持取消
+                # 创建脚本执行任务，支持取消和超时
                 script_task = None
+                timeout_event = asyncio.Event()
+                
+                async def timeout_watcher():
+                    """超时监控器"""
+                    try:
+                        await asyncio.sleep(timeout)
+                        logger.warning(f"[Executor] 任务执行超时: task_id={task_id}, timeout={timeout}秒")
+                        timeout_event.set()
+                    except asyncio.CancelledError:
+                        pass
+                
                 try:
                     script_task = asyncio.create_task(asyncio.to_thread(run_module))
+                    timeout_task = asyncio.create_task(timeout_watcher())
                     
-                    # 等待脚本执行完成或取消事件
+                    # 等待脚本执行完成、取消事件或超时事件
                     done, pending = await asyncio.wait(
-                        [script_task, asyncio.create_task(cancelled_event.wait())],
+                        [
+                            script_task, 
+                            asyncio.create_task(cancelled_event.wait()),
+                            asyncio.create_task(timeout_event.wait())
+                        ],
                         return_when=asyncio.FIRST_COMPLETED
                     )
                     
-                    # 如果检测到取消，取消脚本任务
+                    # 如果检测到超时
+                    if timeout_event.is_set():
+                        logger.warning(f"[Executor] 检测到超时，正在取消任务: task_id={task_id}")
+                        timeout_task.cancel()
+                        if script_task and not script_task.done():
+                            script_task.cancel()
+                            try:
+                                await script_task
+                            except asyncio.CancelledError:
+                                pass
+                        await cls.write_log(log_path, f"[TIMEOUT] 任务执行超时（超过{timeout}秒），已中断")
+                        raise asyncio.CancelledError(f"任务执行超时（超过{timeout}秒）")
+                    
+                    # 如果检测到取消
                     if cancelled_event.is_set():
                         logger.info(f"[Executor] 检测到取消标志，正在取消任务: task_id={task_id}")
+                        timeout_task.cancel()
                         if script_task and not script_task.done():
                             script_task.cancel()
                             try:
@@ -370,6 +402,7 @@ class TaskExecutor:
                         raise asyncio.CancelledError("任务已被取消")
                     
                     # 获取脚本执行结果
+                    timeout_task.cancel()
                     return_code = await script_task
                 finally:
                     # 取消取消检查任务
@@ -421,8 +454,13 @@ class TaskExecutor:
                 
                 logger.info(f"批次任务执行完成: task_id={task_id}, return_code={return_code}, status={final_status}")
                 
-            except asyncio.CancelledError:
-                await cls.write_log(log_path, "[CANCELLED] 批次任务被取消")
+            except asyncio.CancelledError as ce:
+                # 判断是超时还是手动取消
+                error_msg = str(ce) if str(ce) else "任务已被取消"
+                is_timeout = "超时" in error_msg
+                
+                log_msg = "[TIMEOUT] 批次任务执行超时" if is_timeout else "[CANCELLED] 批次任务被取消"
+                await cls.write_log(log_path, log_msg)
                 await flush_log_buffer()  # 刷新缓冲区
                 
                 # 使用独立的数据库会话更新任务状态
@@ -434,12 +472,12 @@ class TaskExecutor:
                             id=task_id,
                             data={
                                 "task_status": TaskStatus.CANCELLED,
-                                "error_message": "任务已被取消",
+                                "error_message": error_msg,
                                 "progress": 100,
                             },
                         )
                         await cancel_db.commit()
-                        logger.info(f"[Executor] 任务取消状态已更新: task_id={task_id}")
+                        logger.info(f"[Executor] 任务取消状态已更新: task_id={task_id}, reason={error_msg}")
                     except Exception as e:
                         await cancel_db.rollback()
                         logger.error(f"更新任务取消状态失败: {e}")
