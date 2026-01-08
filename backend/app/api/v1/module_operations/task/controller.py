@@ -38,7 +38,7 @@ async def execute_task_controller(
         ])
     ),
 ) -> JSONResponse:
-    logger.info(f"收到任务请求 - 任务类型: {data.task_type}, 操作类型: {data.operator_type}, 元数据数: {len(data.operator_metas)}")
+    logger.info(f"收到任务请求 - 任务类型: {data.task_type}, 操作类型: {data.operator_type}, 元数据数: {len(data.operator_metas)}, 超时: {data.timeout}秒")
     
     # 转换 operator_metas 为字典列表（如果已经是字典则直接使用）
     operator_metas_list = [
@@ -51,6 +51,7 @@ async def execute_task_controller(
         task_type=data.task_type,
         operator_type=data.operator_type,
         operator_metas=operator_metas_list,
+        timeout=data.timeout,
         auth=auth,
         redis=redis,
     )

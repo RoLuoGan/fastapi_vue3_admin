@@ -172,3 +172,4 @@ class ExecuteTaskSchema(BaseModel):
     task_type: str = Field(..., description=f"任务类型: {', '.join([f'{t.value}({TaskType.get_label(t.value)})' for t in TaskType])}")
     operator_type: str = Field(..., description=f"操作类型: {', '.join([f'{o.value}({OperatorType.get_label(o.value)})' for o in OperatorType])}")
     operator_metas: List[Dict[str, Any]] = Field(..., description="操作元数据列表（任意结构，由客户端自定义）", min_length=1)
+    timeout: Optional[int] = Field(default=3600, description="任务超时时间（秒），默认3600秒（1小时）")

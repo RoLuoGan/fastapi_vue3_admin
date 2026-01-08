@@ -54,6 +54,25 @@ services:
       - redis
     networks:
       - app_network
+
+  # celery-worker服务
+  celery-worker:
+    container_name: celery-worker
+    build:
+      context: ./
+      dockerfile: ./devops/backend/Dockerfile
+    image: backend:latest
+    restart: always
+    environment:
+      TZ: "Asia/Shanghai"
+    volumes:
+      - ./backend:/home
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - app_network
+    command: ["devops-admin", "celery-worker", "--env=prod", "--queue=scripts", "--concurrency=4"]
   
   # 前端nginx服务
   nginx:
