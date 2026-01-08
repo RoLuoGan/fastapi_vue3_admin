@@ -178,3 +178,44 @@ class NginxUpstreamModel(CreatorMixin):
         lazy="selectin"
     )
 
+
+class CeleryWorkerModel(CreatorMixin):
+    """
+    Celery Worker节点表 - 用于存储Celery执行队列节点信息
+    """
+    __tablename__ = "operations_celery_worker"
+    __table_args__ = (
+        UniqueConstraint('queue_code', 'node_ip', name='uq_celery_worker_queue_ip'),
+        {'comment': 'Celery Worker节点表'}
+    )
+    __loader_options__ = ["creator"]
+
+    # 基础字段
+    queue_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="执行队列名称")
+    queue_code: Mapped[str] = mapped_column(String(50), nullable=False, index=True, comment="执行队列编码")
+    node_ip: Mapped[str] = mapped_column(String(50), nullable=False, comment="节点IP")
+    node_hostname: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="节点主机名")
+    status: Mapped[bool] = mapped_column(Boolean(), default=True, nullable=False, comment="是否在线(True:在线 False:离线)")
+    last_heartbeat: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="最后心跳时间戳")
+
+
+class ScriptModel(CreatorMixin):
+    """
+    脚本管理表 - 用于存储通用脚本信息
+    """
+    __tablename__ = "operations_script"
+    __table_args__ = (
+        UniqueConstraint('name', name='uq_script_name'),
+        {'comment': '脚本管理表'}
+    )
+    __loader_options__ = ["creator"]
+
+    # 基础字段
+    name: Mapped[str] = mapped_column(String(100), nullable=False, comment="脚本名称")
+    script_type: Mapped[str] = mapped_column(String(20), nullable=False, comment="脚本类型(python/shell)")
+    content_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text", comment="脚本内容类型(text/local_path)")
+    content: Mapped[str] = mapped_column(Text, nullable=False, comment="脚本内容或本地路径")
+    default_timeout: Mapped[int] = mapped_column(Integer, nullable=False, default=3600, comment="默认超时时间(秒)")
+    queue_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="执行队列编码")
+    params_schema: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="脚本参数JSON Schema")
+    status: Mapped[bool] = mapped_column(Boolean(), default=True, nullable=False, comment="是否启用(True:启用 False:禁用)")

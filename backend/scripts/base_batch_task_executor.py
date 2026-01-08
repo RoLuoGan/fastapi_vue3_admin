@@ -11,6 +11,7 @@ from typing import Dict, Any, Optional, List, Callable
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 
@@ -90,6 +91,34 @@ class BaseBatchTaskExecutor(ABC):
         """
         if self.progress_handler:
             self.progress_handler(progress, message)
+    
+    def _parse_and_update_progress(self, line: str) -> bool:
+        """
+        解析输出行中的进度信息，如果包含进度信息则更新进度
+        
+        Args:
+            line: 输出行内容
+            
+        Returns:
+            bool: 如果成功解析并更新了进度，返回 True；否则返回 False
+        """
+        # 进度解析正则表达式：匹配 "PROGRESS: {数字}" 或 "PROGRESS: {数字} - {消息}"
+        progress_pattern = re.compile(r'PROGRESS:\s*(\d+)(?:\s*-\s*(.+))?', re.IGNORECASE)
+        
+        progress_match = progress_pattern.search(line)
+        if progress_match:
+            try:
+                progress_value = int(progress_match.group(1))
+                progress_message = progress_match.group(2).strip() if progress_match.group(2) else ""
+                # 确保进度值在 0-100 范围内
+                progress_value = max(0, min(100, progress_value))
+                # 调用进度更新方法
+                self.output_progress(progress_value, progress_message)
+                return True
+            except (ValueError, AttributeError):
+                # 如果解析失败，忽略错误
+                return False
+        return False
         
         progress_line = f"PROGRESS: {progress} - {message}"
         self.write_log(progress_line)
@@ -356,6 +385,9 @@ class BaseBatchTaskExecutor(ABC):
             for raw_line in iter(process.stdout.readline, ""):
                 line = raw_line.rstrip("\r\n")
                 if line:
+                    # 尝试解析并更新进度信息
+                    self._parse_and_update_progress(line)
+                    
                     self.write_log(f"[命令输出] {line}")
             process.stdout.close()
         
