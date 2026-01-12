@@ -11,7 +11,7 @@
 /*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
 /*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
-
+SET NAMES utf8mb4;
 -- ----------------------------
 -- Table structure for operations_celery_worker
 -- ----------------------------
@@ -27,6 +27,7 @@ CREATE TABLE `operations_celery_worker` (
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否在线(1:在线 0:离线)',
   `last_heartbeat` int DEFAULT NULL COMMENT '最后心跳时间戳',
   `creator_id` int DEFAULT NULL COMMENT '创建人ID',
+  `description` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '描述',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
@@ -54,6 +55,7 @@ CREATE TABLE `operations_script` (
   `params_schema` text COLLATE utf8mb4_unicode_ci COMMENT '脚本参数JSON Schema',
   `status` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否启用(1:启用 0:禁用)',
   `creator_id` int DEFAULT NULL COMMENT '创建人ID',
+  `description` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '描述',
   `created_at` datetime DEFAULT NULL COMMENT '创建时间',
   `updated_at` datetime DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),

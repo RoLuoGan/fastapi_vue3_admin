@@ -17,7 +17,7 @@ from .module_application import ApplicationRouter
 # 代码生成模块
 from .module_generator import GeneratorRouter
 
-# 运维管理模块
+# 运维管理模块（包含AI Agent）
 from .module_operations import OperationsRouter
 
 

@@ -10,6 +10,7 @@ from .prometheus import PrometheusRouter
 from .nginx_upstream import router as NginxUpstreamRouter
 from .celery_worker import CeleryWorkerRouter
 from .script import ScriptRouter
+from .aiagent import AIAgentRouter
 
 
 OperationsRouter = APIRouter(prefix="/operations")
@@ -21,4 +22,5 @@ OperationsRouter.include_router(PrometheusRouter)
 OperationsRouter.include_router(NginxUpstreamRouter)
 OperationsRouter.include_router(CeleryWorkerRouter)
 OperationsRouter.include_router(ScriptRouter)
+OperationsRouter.include_router(AIAgentRouter)
 

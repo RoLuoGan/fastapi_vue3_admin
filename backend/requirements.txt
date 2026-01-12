@@ -39,3 +39,8 @@ rich==13.9.4
 sqlglot[rs]==27.8.0         # sql 解析
 ansible==8.7.0              # ansible 自动化运维工具
 celery==5.6.2               # celery 任务队列
+# AI Agent 模块依赖
+langchain==1.2.3            # langchain 核心框架
+langchain-core==1.2.6       # langchain 核心框架
+langchain-openai==1.1.7     # langchain 核心框架
+mcp==1.25.0                 # mcp 协议支持

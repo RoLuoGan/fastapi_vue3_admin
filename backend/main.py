@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import os
+import sys
 import uvicorn
 import typer
 from fastapi import FastAPI
@@ -201,6 +202,69 @@ def celery_beat(
         raise typer.Exit(code=1)
 
 
+@shell_app.command()
+def mcp_server(
+    env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", help="运行环境 (dev, prod)"),
+    host: str = typer.Option("0.0.0.0", "--host", help="监听地址"),
+    port: int = typer.Option(8001, "--port", help="监听端口"),
+    log_level: str = typer.Option("INFO", "--log-level", help="日志级别"),
+    user_id: int = typer.Option(None, "--user-id", "-u", help="用户ID（可选，默认使用管理员）"),
+):
+    """
+    启动 MCP streamable-http 服务器。
+    
+    使用官方 MCP SDK 的 streamable-http 模式启动独立服务器。
+    客户端通过环境变量 MCP_SERVER_URL 配置服务器地址。
+    """
+    import subprocess
+    
+    typer.echo("=" * 60)
+    typer.echo("启动 MCP streamable-http 服务器")
+    typer.echo("=" * 60)
+    typer.echo(f"  环境: {env.value}")
+    typer.echo(f"  监听地址: {host}")
+    typer.echo(f"  监听端口: {port}")
+    typer.echo(f"  日志级别: {log_level}")
+    if user_id:
+        typer.echo(f"  用户ID: {user_id}")
+    typer.echo("")
+    typer.echo(f"端点地址: POST http://{host}:{port}/mcp")
+    typer.echo("")
+    typer.echo("客户端配置：")
+    typer.echo(f"  设置环境变量: MCP_SERVER_URL=http://{host}:{port}/mcp")
+    typer.echo("=" * 60)
+    typer.echo("")
+    
+    # 设置环境变量
+    os.environ["ENVIRONMENT"] = env.value
+    os.environ["MCP_HOST"] = host
+    os.environ["MCP_PORT"] = str(port)
+    
+    # 构建命令
+    cmd = [
+        sys.executable,
+        "-m", "app.mcp_servers.operations_tools.server",
+        "--transport", "streamable-http",
+        "--host", host,
+        "--port", str(port),
+        "--log-level", log_level.upper()
+    ]
+    
+    if user_id:
+        cmd.extend(["--user-id", str(user_id)])
+    
+    typer.echo(f"执行命令: {' '.join(cmd)}\n")
+    
+    # 启动服务器
+    try:
+        subprocess.run(cmd, check=True)
+    except KeyboardInterrupt:
+        typer.echo("\nMCP 服务器已停止")
+    except subprocess.CalledProcessError as e:
+        typer.echo(f"MCP 服务器启动失败: {e}", err=True)
+        raise typer.Exit(code=1)
+
+
 if __name__ == '__main__':
     # 启动服务
     # python3 main.py run --env=dev(不加默认为dev)
@@ -212,5 +276,8 @@ if __name__ == '__main__':
     # python3 main.py celery-worker --env=dev --queue=scripts --concurrency=4
     # 启动 Celery Beat
     # python3 main.py celery-beat --env=dev
+    # 启动 MCP streamable-http 服务器
+    # python3 main.py mcp-server --env=dev --host=0.0.0.0 --port=8001
+    # python3 main.py mcp-server --env=dev --port=8001 --user-id=1
     
     shell_app()
