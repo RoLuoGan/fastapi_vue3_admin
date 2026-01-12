@@ -106,11 +106,12 @@ async def chat_stream(
     """
     return StreamingResponse(
         AIAgentService.chat_stream(auth=auth, request=request),
-        media_type="text/event-stream",
+        media_type="text/event-stream; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
+            "X-Accel-Buffering": "no",  # 禁用nginx缓冲
+            "Content-Encoding": "identity",  # 禁用压缩，确保实时推送
         }
     )
 

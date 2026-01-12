@@ -322,12 +322,14 @@ class AIAgent:
         Yields:
             流式响应块
         """
-        # 保存用户消息
-        await self.crud.create_message(
+        # 1. 立即保存用户消息并返回消息ID
+        user_msg = await self.crud.create_message(
             session_id=self.session_id,
             role=MessageRole.USER,
             content=message
         )
+        # 通知前端用户消息已保存
+        yield {"type": "user_saved", "message_id": user_msg.id}
         
         # 获取历史消息
         history = await self.crud.get_session_history(self.session_id, limit=10)
@@ -350,21 +352,24 @@ class AIAgent:
         
         # 流式调用LLM
         full_content = ""
+        assistant_msg_id = None
         try:
             async for chunk in self.llm.astream(formatted_prompt):
                 if hasattr(chunk, 'content') and chunk.content:
                     full_content += chunk.content
                     yield {"type": "text", "content": chunk.content}
             
-            # 保存完整消息
+            # 2. AI流式输出完成后保存历史记录
             if full_content:
-                await self.crud.create_message(
+                assistant_msg = await self.crud.create_message(
                     session_id=self.session_id,
                     role=MessageRole.ASSISTANT,
                     content=full_content
                 )
+                assistant_msg_id = assistant_msg.id
             
-            yield {"type": "complete"}
+            # 返回完成状态和助手消息ID
+            yield {"type": "complete", "message_id": assistant_msg_id}
         
         except Exception as e:
             logger.error(f"流式响应错误: {str(e)}")

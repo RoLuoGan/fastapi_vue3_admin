@@ -2,6 +2,7 @@
 """
 MCP运维工具服务器主文件
 将现有运维API封装为MCP协议的工具，供AI Agent调用
+仅支持 streamable-http 传输模式
 """
 
 import sys
@@ -9,89 +10,27 @@ import os
 from pathlib import Path
 
 # 确保能够导入 app 模块
-# 获取当前脚本所在目录
 current_file = Path(__file__).resolve()
-# 计算 backend 目录（当前文件的父目录的父目录的父目录的父目录）
 backend_dir = current_file.parent.parent.parent.parent
-# 将 backend 目录添加到 Python 路径
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
 import asyncio
-import logging
 from typing import Optional
 import uvicorn
 
-# 先配置基础日志（在导入其他模块之前）
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stderr)  # 输出到 stderr，确保能被 stdio_client 捕获
-    ]
-)
-logger = logging.getLogger(__name__)
+from app.core.logger import logger
+from mcp.server import Server
+from mcp.server.streamable_http import StreamableHTTPServerTransport
+from app.config.setting import settings
+from app.core.database import session_connect
+from app.api.v1.module_system.auth.schema import AuthSchema
+from app.api.v1.module_system.user.crud import UserCRUD
 
-try:
-    from mcp.server import Server
-    from mcp.server.stdio import stdio_server
-    # 尝试导入 streamable-http 支持
-    try:
-        from mcp.server.streamable_http import create_streamable_http_app
-        STREAMABLE_HTTP_AVAILABLE = True
-        logger.info("streamable-http 支持可用")
-    except ImportError:
-        STREAMABLE_HTTP_AVAILABLE = False
-        logger.warning("streamable-http 支持不可用，将使用 stdio 模式")
-    logger.info("MCP模块导入成功")
-except Exception as e:
-    print(f"ERROR: 导入MCP模块失败: {str(e)}", file=sys.stderr, flush=True)
-    import traceback
-    traceback.print_exc(file=sys.stderr)
-    raise
-
-try:
-    from app.config.setting import settings
-    logger.info("settings模块导入成功")
-except Exception as e:
-    print(f"ERROR: 导入settings模块失败: {str(e)}", file=sys.stderr, flush=True)
-    import traceback
-    traceback.print_exc(file=sys.stderr)
-    raise
-
-try:
-    from app.core.database import session_connect
-    logger.info("database模块导入成功")
-except Exception as e:
-    print(f"ERROR: 导入database模块失败: {str(e)}", file=sys.stderr, flush=True)
-    import traceback
-    traceback.print_exc(file=sys.stderr)
-    raise
-
-try:
-    from app.api.v1.module_system.auth.schema import AuthSchema
-    from app.api.v1.module_system.user.crud import UserCRUD
-    logger.info("auth和user模块导入成功")
-except Exception as e:
-    print(f"ERROR: 导入auth/user模块失败: {str(e)}", file=sys.stderr, flush=True)
-    import traceback
-    traceback.print_exc(file=sys.stderr)
-    raise
-
-try:
-    from .config import mcp_config
-    from .tools.server_tools import register_server_tools
-    from .tools.task_tools import register_task_tools
-    from .tools.query_tools import register_query_tools
-    logger.info("MCP工具模块导入成功")
-    
-    # 更新日志级别（在导入 mcp_config 之后）
-    logger.setLevel(getattr(logging, mcp_config.log_level))
-except Exception as e:
-    print(f"ERROR: 导入MCP工具模块失败: {str(e)}", file=sys.stderr, flush=True)
-    import traceback
-    traceback.print_exc(file=sys.stderr)
-    raise
+from .config import mcp_config
+from .tools.server_tools import register_server_tools
+from .tools.task_tools import register_task_tools
+from .tools.query_tools import register_query_tools
 
 
 class OperationsMCPServer:
@@ -119,9 +58,6 @@ class OperationsMCPServer:
             mcp_config.api_base_url = api_base_url
         mcp_config.api_timeout = api_timeout
         
-        # 更新日志级别
-        logger.setLevel(getattr(logging, mcp_config.log_level))
-        
         self.mcp_server = Server(mcp_config.server_name)
         self.user_id = user_id
         self.auth: Optional[AuthSchema] = None
@@ -137,25 +73,30 @@ class OperationsMCPServer:
             user_id = self.user_id or 1
             logger.info(f"正在获取用户信息，user_id={user_id}")
             
-            # 获取用户信息
-            user_crud = UserCRUD(None)
-            user_crud.db = self.db
+            # 先创建一个临时的认证上下文（不带用户信息，不检查数据权限）
+            temp_auth = AuthSchema(
+                db=self.db,
+                user=None,
+                check_data_scope=False
+            )
+            
+            # 使用临时认证上下文获取用户信息
+            user_crud = UserCRUD(temp_auth)
             user = await user_crud.get_by_id_crud(id=user_id)
             
             if not user:
                 raise ValueError(f"用户不存在: user_id={user_id}")
             
-            # 创建认证上下文
+            # 创建完整的认证上下文（带用户信息）
             self.auth = AuthSchema(
                 db=self.db,
-                current_user=user,
-                user_id=user.id,
-                username=user.username
+                user=user,
+                check_data_scope=False  # MCP服务器不需要检查数据权限
             )
             
             logger.info(f"MCP服务器认证初始化完成，用户: {user.username}")
         except Exception as e:
-            logger.error(f"初始化认证上下文失败: {str(e)}", exc_info=True)
+            logger.error(f"初始化认证上下文失败: {str(e)}")
             raise
     
     async def setup(self):
@@ -177,13 +118,12 @@ class OperationsMCPServer:
         
         logger.info(f"MCP服务器 '{mcp_config.server_name}' 初始化完成")
     
-    async def run(self, transport: str = "stdio", log_level: str = "INFO"):
+    async def run(self, log_level: str = "INFO"):
         """
-        运行MCP服务器
+        运行MCP服务器（streamable-http 模式）
         
         Args:
-            transport: 传输模式，"stdio" 或 "streamable-http"
-            log_level: 日志级别（仅用于 streamable-http 模式）
+            log_level: 日志级别
         """
         try:
             # 先完成所有初始化工作
@@ -191,98 +131,130 @@ class OperationsMCPServer:
             await self.setup()
             logger.info("MCP服务器设置完成")
             
-            if transport == "streamable-http":
-                # 使用 streamable-http 传输
-                if not STREAMABLE_HTTP_AVAILABLE:
-                    raise RuntimeError("streamable-http 传输不可用，请检查 MCP SDK 版本")
+            # 使用 streamable-http 传输
+            logger.info("启动 streamable-http 服务器...")
+            from starlette.applications import Starlette
+            from starlette.routing import Route, Mount
+            from starlette.middleware import Middleware
+            from starlette.middleware.cors import CORSMiddleware
+            from starlette.responses import JSONResponse
+            import contextlib
+            import uuid
+            
+            # 从配置获取，允许环境变量覆盖
+            host = os.getenv("MCP_HOST") or settings.MCP_SERVER_HOST
+            port = int(os.getenv("MCP_PORT") or settings.MCP_SERVER_PORT)
+            
+            # 存储活跃的会话
+            active_sessions: dict[str, tuple[StreamableHTTPServerTransport, asyncio.Task]] = {}
+            
+            # 健康检查端点
+            async def health_check(request):
+                return JSONResponse({
+                    "status": "ok",
+                    "service": "mcp-operations-tools",
+                    "transport": "streamable-http",
+                    "active_sessions": len(active_sessions)
+                })
+            
+            # MCP ASGI 应用
+            async def mcp_asgi_app(scope, receive, send):
+                """ASGI 应用，为每个新会话创建独立的 transport"""
+                if scope["type"] != "http":
+                    return
                 
-                logger.info("启动 streamable-http 服务器...")
-                from fastapi import FastAPI
-                from fastapi.middleware.cors import CORSMiddleware
-                import contextlib
+                # 从请求头获取会话ID
+                headers = dict(scope.get("headers", []))
+                session_id = headers.get(b"mcp-session-id", b"").decode() or None
                 
-                # 创建 streamable-http 应用
-                # 使用 create_streamable_http_app，server_factory 返回已初始化的服务器
-                # 注意：server_factory 会在每次请求时调用，但我们已经初始化了服务器
-                def server_factory():
-                    logger.debug("创建MCP服务器实例（使用已初始化的服务器）")
-                    return self.mcp_server
+                if session_id and session_id in active_sessions:
+                    # 已存在的会话，使用现有 transport
+                    transport, _ = active_sessions[session_id]
+                    await transport.handle_request(scope, receive, send)
+                    return
                 
-                logger.info("创建 streamable-http 应用...")
-                mcp_app = create_streamable_http_app(
-                    server_factory=server_factory,
-                    stateless_http=False
+                # 新会话：创建新的 transport
+                new_session_id = str(uuid.uuid4())
+                logger.info(f"创建新的 MCP 会话: {new_session_id}")
+                
+                transport = StreamableHTTPServerTransport(
+                    mcp_session_id=new_session_id,
+                    is_json_response_enabled=False
                 )
-                logger.info("streamable-http 应用创建成功")
                 
-                # 创建 FastAPI 应用并挂载 MCP 应用
-                @contextlib.asynccontextmanager
-                async def lifespan(app: FastAPI):
-                    # MCP 服务器的生命周期管理
-                    logger.info("MCP服务器生命周期开始")
-                    yield
-                    logger.info("MCP服务器生命周期结束")
+                # 启动 MCP 服务器处理该会话
+                async def run_session():
+                    try:
+                        async with transport.connect() as (read_stream, write_stream):
+                            logger.info(f"MCP 会话 {new_session_id} 已建立")
+                            await self.mcp_server.run(
+                                read_stream,
+                                write_stream,
+                                self.mcp_server.create_initialization_options()
+                            )
+                    except Exception as e:
+                        logger.error(f"MCP 会话 {new_session_id} 错误: {e}")
+                    finally:
+                        # 会话结束，清理
+                        if new_session_id in active_sessions:
+                            del active_sessions[new_session_id]
+                            logger.info(f"MCP 会话 {new_session_id} 已清理")
                 
-                app = FastAPI(
-                    title="MCP Operations Tools Server",
-                    description="MCP 运维工具服务器（streamable-http 模式）",
-                    version="1.0.0",
-                    lifespan=lifespan
-                )
+                # 启动会话任务
+                session_task = asyncio.create_task(run_session())
+                active_sessions[new_session_id] = (transport, session_task)
                 
-                # 配置 CORS
-                app.add_middleware(
-                    CORSMiddleware,
-                    allow_origins=["*"],
-                    allow_credentials=True,
-                    allow_methods=["*"],
-                    allow_headers=["*"],
-                )
+                # 等待一小段时间让 transport 准备好
+                await asyncio.sleep(0.01)
                 
-                # 添加健康检查端点（在挂载之前）
-                @app.get("/health")
-                async def health_check():
-                    return {"status": "ok", "service": "mcp-operations-tools", "transport": "streamable-http"}
-                
-                # 挂载 MCP 应用到 /mcp 路径
-                # 客户端访问 http://host:port/mcp
-                # 注意：create_streamable_http_app 返回的是 Starlette 应用，可以直接使用 app.mount
-                logger.info("挂载 MCP 应用到 /mcp 路径")
-                app.mount("/mcp", mcp_app)
-                logger.info("MCP 应用挂载完成，端点: POST http://{host}:{port}/mcp".format(host=os.getenv("MCP_HOST", "0.0.0.0"), port=os.getenv("MCP_PORT", "8001")))
-                
-                # 启动服务器
-                host = os.getenv("MCP_HOST", "0.0.0.0")
-                port = int(os.getenv("MCP_PORT", "8001"))
-                logger.info(f"启动 streamable-http 服务器: {host}:{port}")
-                logger.info(f"MCP端点: POST http://{host}:{port}/mcp")
-                logger.info(f"健康检查: GET http://{host}:{port}/health")
-                
-                # 打印所有路由用于调试
-                logger.debug("FastAPI应用路由:")
-                for route in app.routes:
-                    logger.debug(f"  {route.path} - {route.methods if hasattr(route, 'methods') else 'N/A'}")
-                
-                config = uvicorn.Config(app, host=host, port=port, log_level=log_level.lower())
-                server_instance = uvicorn.Server(config)
-                await server_instance.serve()
-            else:
-                # 使用stdio传输运行服务器
-                logger.info("启动 stdio_server...")
-                async with stdio_server() as (read_stream, write_stream):
-                    logger.info("stdio_server 已启动，开始运行MCP服务器...")
-                    await self.mcp_server.run(
-                        read_stream,
-                        write_stream,
-                        self.mcp_server.create_initialization_options()
-                    )
+                # 处理当前请求
+                await transport.handle_request(scope, receive, send)
+            
+            # lifespan
+            @contextlib.asynccontextmanager
+            async def lifespan(app):
+                logger.info("MCP 服务器生命周期开始")
+                yield
+                # 清理所有活跃会话
+                logger.info("MCP 服务器生命周期结束，清理活跃会话...")
+                for session_id, (transport, task) in list(active_sessions.items()):
+                    await transport.terminate()
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                active_sessions.clear()
+            
+            # 创建 Starlette 应用
+            app = Starlette(
+                debug=True,
+                lifespan=lifespan,
+                routes=[
+                    Route("/health", health_check, methods=["GET"]),
+                    Mount("/mcp", app=mcp_asgi_app),
+                ],
+                middleware=[
+                    Middleware(
+                        CORSMiddleware,
+                        allow_origins=["*"],
+                        allow_credentials=True,
+                        allow_methods=["*"],
+                        allow_headers=["*"],
+                    ),
+                ],
+            )
+            
+            logger.info(f"启动 streamable-http 服务器: {host}:{port}")
+            logger.info(f"MCP端点: POST http://{host}:{port}/mcp")
+            logger.info(f"健康检查: GET http://{host}:{port}/health")
+            
+            config = uvicorn.Config(app, host=host, port=port, log_level=log_level.lower())
+            server_instance = uvicorn.Server(config)
+            await server_instance.serve()
+            
         except Exception as e:
-            logger.error(f"MCP服务器运行失败: {str(e)}", exc_info=True)
-            # 确保错误被输出到 stderr，以便客户端能够捕获
-            import sys
-            print(f"ERROR: {str(e)}", file=sys.stderr, flush=True)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
+            logger.error(f"MCP服务器运行失败: {str(e)}")
             raise
 
 
@@ -290,8 +262,7 @@ async def main(
     user_id: Optional[int] = None,
     log_level: str = "INFO",
     api_base_url: Optional[str] = None,
-    api_timeout: int = 300,
-    transport: str = "stdio"
+    api_timeout: int = 300
 ):
     """
     主函数
@@ -301,7 +272,6 @@ async def main(
         log_level: 日志级别
         api_base_url: API基础URL（可选）
         api_timeout: API调用超时时间（秒）
-        transport: 传输模式，"stdio" 或 "streamable-http"
     """
     server = OperationsMCPServer(
         user_id=user_id,
@@ -309,11 +279,10 @@ async def main(
         api_base_url=api_base_url,
         api_timeout=api_timeout
     )
-    await server.run(transport=transport, log_level=log_level)
+    await server.run(log_level=log_level)
 
 
 if __name__ == "__main__":
-    import sys
     import argparse
     
     parser = argparse.ArgumentParser(description="MCP Operations Tools Server")
@@ -321,39 +290,28 @@ if __name__ == "__main__":
     parser.add_argument("--log-level", default="INFO", help="日志级别")
     parser.add_argument("--api-base-url", help="API基础URL")
     parser.add_argument("--api-timeout", type=int, default=300, help="API调用超时时间（秒）")
-    parser.add_argument("--transport", choices=["stdio", "streamable-http"], default="streamable-http", help="传输模式")
-    parser.add_argument("--host", default="0.0.0.0", help="streamable-http 模式监听地址")
-    parser.add_argument("--port", type=int, default=8001, help="streamable-http 模式监听端口")
+    parser.add_argument("--host", default="0.0.0.0", help="监听地址")
+    parser.add_argument("--port", type=int, default=8001, help="监听端口")
     
     args = parser.parse_args()
     
-    # 设置环境变量（用于 streamable-http 模式）
-    if args.transport == "streamable-http":
-        os.environ["MCP_HOST"] = args.host
-        os.environ["MCP_PORT"] = str(args.port)
+    # 设置环境变量
+    os.environ["MCP_HOST"] = args.host
+    os.environ["MCP_PORT"] = str(args.port)
     
     try:
         logger.info("MCP服务器启动中...")
-        logger.info(f"传输模式: {args.transport}")
         logger.info(f"用户ID: {args.user_id}")
-        if args.transport == "streamable-http":
-            logger.info(f"监听地址: {args.host}:{args.port}")
-        logger.info(f"Python路径: {sys.path[:3]}")
+        logger.info(f"监听地址: {args.host}:{args.port}")
         asyncio.run(main(
             user_id=args.user_id,
             log_level=args.log_level,
             api_base_url=args.api_base_url,
-            api_timeout=args.api_timeout,
-            transport=args.transport
+            api_timeout=args.api_timeout
         ))
     except KeyboardInterrupt:
         logger.info("MCP服务器被用户中断")
-        print("INFO: MCP服务器被用户中断", file=sys.stderr, flush=True)
         sys.exit(0)
     except Exception as e:
-        error_msg = f"MCP服务器启动失败: {str(e)}"
-        print(f"ERROR: {error_msg}", file=sys.stderr, flush=True)
-        logger.error(error_msg, exc_info=True)
-        import traceback
-        traceback.print_exc(file=sys.stderr)
+        logger.error(f"MCP服务器启动失败: {str(e)}")
         sys.exit(1)

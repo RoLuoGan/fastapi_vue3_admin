@@ -27,13 +27,20 @@
               <span class="message-time" v-if="msg.created_at">
                 {{ formatTime(msg.created_at) }}
               </span>
+              <span v-if="msg.isStreaming" class="streaming-indicator">
+                <el-icon class="is-loading"><Loading /></el-icon>
+                生成中...
+              </span>
             </div>
-            <div class="message-text" v-html="formatContent(msg.content)"></div>
+            <div class="message-text">
+              <span v-html="formatContent(msg.content)"></span>
+              <span v-if="msg.isStreaming" class="typing-cursor">|</span>
+            </div>
           </div>
         </div>
 
-        <!-- 加载指示器 -->
-        <div v-if="loading" class="message-item message-assistant">
+        <!-- 加载指示器（仅在没有流式消息时显示） -->
+        <div v-if="loading && !hasStreamingMessage" class="message-item message-assistant">
           <div class="message-avatar">
             <el-avatar :size="32" style="background-color: #409eff">
               <el-icon><Service /></el-icon>
@@ -86,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
 import { User, Loading, Position, Service, CircleClose } from '@element-plus/icons-vue'
 
 const props = defineProps<{
@@ -96,6 +103,7 @@ const props = defineProps<{
     role: 'user' | 'assistant' | 'system'
     content: string
     created_at?: string
+    isStreaming?: boolean
   }>
   loading: boolean
 }>()
@@ -108,6 +116,11 @@ const emit = defineEmits<{
 
 const inputValue = ref('')
 const messagesRef = ref<HTMLElement>()
+
+// 检查是否有正在流式输出的消息
+const hasStreamingMessage = computed(() => {
+  return props.messages.some(msg => msg.isStreaming)
+})
 
 // 发送消息
 const handleSend = () => {
@@ -191,6 +204,15 @@ const scrollToBottom = () => {
 // 监听消息变化，自动滚动
 watch(() => props.messages.length, scrollToBottom)
 watch(() => props.loading, scrollToBottom)
+
+// 深度监听消息内容变化（用于流式输出时滚动）
+watch(
+  () => props.messages,
+  () => {
+    scrollToBottom()
+  },
+  { deep: true }
+)
 </script>
 
 <style scoped lang="scss">
@@ -335,6 +357,33 @@ watch(() => props.loading, scrollToBottom)
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+// 流式输出相关样式
+.streaming-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #409eff;
+  font-size: 12px;
+  margin-left: 8px;
+}
+
+.typing-cursor {
+  display: inline-block;
+  animation: blink 1s step-end infinite;
+  color: #409eff;
+  font-weight: bold;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
   }
 }
 </style>

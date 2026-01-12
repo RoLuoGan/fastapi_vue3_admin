@@ -121,6 +121,7 @@ class AIAgentCRUD:
         )
         self.db.add(message)
         await self.db.flush()
+        await self.db.commit()  # 流式响应需要立即提交，否则事务可能被回滚
         await self.db.refresh(message)
         return message
     

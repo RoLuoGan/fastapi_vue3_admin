@@ -5,7 +5,7 @@ fastapi==0.115.2
 Jinja2==3.1.6
 typer==0.9.0
 click==8.1.7
-uvicorn==0.30.6         # uvicorn web 框架
+uvicorn>=0.31.1         # uvicorn web 框架 (需要>=0.31.1以兼容mcp)
 gunicorn==23.0.0        # 协程框架
 websockets==14.2        # websocket 框架
 httpx==0.28.1           # HTTP 客户端
@@ -17,7 +17,7 @@ pillow==11.0.0          # 图片处理
 pydantic_validation_decorator==0.1.4
 passlib==1.7.4              # 密码加密
 user-agents==2.2.0          # 获取用户UA
-PyJWT==2.9.0                # OAuth2
+PyJWT>=2.10.1               # OAuth2 (需要>=2.10.1以兼容mcp)
 pydantic-settings==2.5.2    # 配置设置
 psutil==6.1.0               # 系统信息
 python-multipart==0.0.9     # request.form() 对表单进行「解析」时安装
@@ -33,7 +33,7 @@ asyncpg==0.30.0             # postgresql 异步操作数据库基于 psycopg2：
 psycopg2==2.9.10            # postgresql 同步操作数据库基于 psycopg2：psycopg2 是一个 pure-Python PostgreSQL 适配器。
 PyMySQL==1.1.2              # mysql 异步操作数据库基于 pymysql：aiomysql 是 pymysql 的异步版本，pymysql 是一个纯 Python 实现的 MySQL 客户端。成熟度：aiomysql 相对较为成熟，社区支持较好，文档也比较完善。
 cryptography==45.0.2        # mysql8 密码加密
-openai==1.55.2              # ai 大模型
+openai>=1.109.1             # ai 大模型 (需要>=1.109.1以兼容langchain-openai)
 oss2==2.18.4                # 阿里云对象存储
 rich==13.9.4
 sqlglot[rs]==27.8.0         # sql 解析

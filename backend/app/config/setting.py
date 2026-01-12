@@ -266,6 +266,22 @@ class Settings(BaseSettings):
     OPENAI_MODEL: str
 
     # ================================================= #
+    # ******************* MCP 服务配置 ****************** #
+    # ================================================= #
+    # MCP 服务端配置
+    MCP_SERVER_ENABLE: bool = True                      # 是否启用 MCP 服务
+    MCP_SERVER_NAME: str = "operations-tools"           # MCP 服务名称
+    MCP_SERVER_HOST: str = "0.0.0.0"                    # MCP 服务监听地址
+    MCP_SERVER_PORT: int = 8002                         # MCP 服务监听端口
+    MCP_SERVER_LOG_LEVEL: str = "INFO"                  # MCP 服务日志级别
+    MCP_API_TIMEOUT: int = 300                          # MCP API 调用超时时间（秒）
+    MCP_MAX_BATCH_SIZE: int = 50                        # MCP 批量操作最大数量
+    
+    # MCP 客户端配置
+    MCP_CLIENT_ENABLE: bool = True                      # 是否启用 MCP 客户端
+    MCP_SERVER_URL: str = "http://127.0.0.1:8002/mcp"   # MCP 服务器完整 URL（客户端连接地址）
+
+    # ================================================= #
     # ******************* 其他配置 ******************* #
     # ================================================= #
     @property

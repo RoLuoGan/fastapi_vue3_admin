@@ -1,4 +1,5 @@
 import request from "@/utils/request";
+import { Auth } from "@/utils/auth";
 
 const API_PATH = "/operations/aiagent";
 
@@ -62,10 +63,88 @@ const AIAgentAPI = {
   },
 
   /**
-   * 发送消息（流式）- 返回 EventSource URL
+   * 发送消息（流式）- 使用 fetch + ReadableStream
+   * @param data 聊天请求数据
+   * @param onChunk 接收每个chunk的回调
+   * @param onComplete 完成回调
+   * @param onError 错误回调
+   * @param signal 用于取消请求
    */
-  getChatStreamUrl(sessionId: number): string {
-    return `${API_PATH}/chat/stream?session_id=${sessionId}`;
+  async sendMessageStream(
+    data: ChatRequest,
+    callbacks: {
+      onChunk?: (chunk: StreamChunk) => void;
+      onComplete?: () => void;
+      onError?: (error: string) => void;
+    },
+    signal?: AbortSignal
+  ) {
+    const token = Auth.getAccessToken();
+    const baseURL = import.meta.env.VITE_APP_BASE_API || "/api/v1";
+    
+    // 调试日志
+    console.log("[AIAgentAPI] 流式请求 token:", token ? `Bearer ${token.substring(0, 20)}...` : "无token");
+    console.log("[AIAgentAPI] 流式请求 URL:", `${baseURL}${API_PATH}/chat/stream`);
+    
+    try {
+      const response = await fetch(`${baseURL}${API_PATH}/chat/stream`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": token ? `Bearer ${token}` : "",
+        },
+        body: JSON.stringify(data),
+        signal,
+        credentials: "same-origin",  // 确保携带凭证
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("无法获取响应流");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr) {
+                const chunk = JSON.parse(jsonStr) as StreamChunk;
+                if (chunk.type === "error") {
+                  callbacks.onError?.(chunk.error || "未知错误");
+                } else if (chunk.type === "complete") {
+                  callbacks.onComplete?.();
+                } else {
+                  callbacks.onChunk?.(chunk);
+                }
+              }
+            } catch (e) {
+              console.warn("解析SSE数据失败:", line, e);
+            }
+          }
+        }
+      }
+      
+      callbacks.onComplete?.();
+    } catch (error: any) {
+      if (error.name !== "AbortError") {
+        callbacks.onError?.(error.message || "流式请求失败");
+      }
+    }
   },
 
   // ==================== 操作确认 ====================
@@ -299,4 +378,15 @@ export interface RuleUpdateRequest {
   priority?: number;
   enabled?: boolean;
   description?: string;
+}
+
+/** 流式响应块 */
+export interface StreamChunk {
+  type: "text" | "tool_start" | "tool_end" | "complete" | "error" | "user_saved";
+  content?: string;
+  tool?: string;
+  input?: string;
+  output?: string;
+  error?: string;
+  message_id?: number;  // 消息保存后返回的ID
 }

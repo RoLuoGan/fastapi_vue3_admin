@@ -205,62 +205,62 @@ def celery_beat(
 @shell_app.command()
 def mcp_server(
     env: EnvironmentEnum = typer.Option(EnvironmentEnum.DEV, "--env", help="运行环境 (dev, prod)"),
-    host: str = typer.Option("0.0.0.0", "--host", help="监听地址"),
-    port: int = typer.Option(8001, "--port", help="监听端口"),
-    log_level: str = typer.Option("INFO", "--log-level", help="日志级别"),
+    host: str = typer.Option(None, "--host", help="监听地址（默认从配置读取）"),
+    port: int = typer.Option(None, "--port", help="监听端口（默认从配置读取）"),
+    log_level: str = typer.Option(None, "--log-level", help="日志级别（默认从配置读取）"),
     user_id: int = typer.Option(None, "--user-id", "-u", help="用户ID（可选，默认使用管理员）"),
 ):
     """
     启动 MCP streamable-http 服务器。
     
     使用官方 MCP SDK 的 streamable-http 模式启动独立服务器。
-    客户端通过环境变量 MCP_SERVER_URL 配置服务器地址。
+    配置优先级：命令行参数 > .env 配置文件
     """
-    import subprocess
+    import asyncio
+    import importlib
+    
+    # 设置环境变量（必须在导入 settings 之前）
+    os.environ["ENVIRONMENT"] = env.value
+    
+    # 导入配置（在设置环境变量之后）
+    from app.config.setting import settings
+    
+    # 使用命令行参数或配置文件的值
+    actual_host = host or settings.MCP_SERVER_HOST
+    actual_port = port or settings.MCP_SERVER_PORT
+    actual_log_level = log_level or settings.MCP_SERVER_LOG_LEVEL
     
     typer.echo("=" * 60)
     typer.echo("启动 MCP streamable-http 服务器")
     typer.echo("=" * 60)
     typer.echo(f"  环境: {env.value}")
-    typer.echo(f"  监听地址: {host}")
-    typer.echo(f"  监听端口: {port}")
-    typer.echo(f"  日志级别: {log_level}")
+    typer.echo(f"  监听地址: {actual_host}")
+    typer.echo(f"  监听端口: {actual_port}")
+    typer.echo(f"  日志级别: {actual_log_level}")
     if user_id:
         typer.echo(f"  用户ID: {user_id}")
     typer.echo("")
-    typer.echo(f"端点地址: POST http://{host}:{port}/mcp")
+    typer.echo(f"端点地址: POST http://{actual_host}:{actual_port}/mcp")
     typer.echo("")
     typer.echo("客户端配置：")
-    typer.echo(f"  设置环境变量: MCP_SERVER_URL=http://{host}:{port}/mcp")
+    typer.echo(f"  设置环境变量: MCP_SERVER_URL=http://{actual_host}:{actual_port}/mcp")
     typer.echo("=" * 60)
     typer.echo("")
     
-    # 设置环境变量
-    os.environ["ENVIRONMENT"] = env.value
-    os.environ["MCP_HOST"] = host
-    os.environ["MCP_PORT"] = str(port)
+    # 设置环境变量供服务端使用
+    os.environ["MCP_HOST"] = actual_host
+    os.environ["MCP_PORT"] = str(actual_port)
     
-    # 构建命令
-    cmd = [
-        sys.executable,
-        "-m", "app.mcp_servers.operations_tools.server",
-        "--transport", "streamable-http",
-        "--host", host,
-        "--port", str(port),
-        "--log-level", log_level.upper()
-    ]
-    
-    if user_id:
-        cmd.extend(["--user-id", str(user_id)])
-    
-    typer.echo(f"执行命令: {' '.join(cmd)}\n")
-    
-    # 启动服务器
+    # 使用 importlib 导入模块并调用主函数
     try:
-        subprocess.run(cmd, check=True)
+        server_module = importlib.import_module("app.mcp_servers.operations_tools.server")
+        asyncio.run(server_module.main(
+            user_id=user_id,
+            log_level=actual_log_level.upper()
+        ))
     except KeyboardInterrupt:
         typer.echo("\nMCP 服务器已停止")
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         typer.echo(f"MCP 服务器启动失败: {e}", err=True)
         raise typer.Exit(code=1)
 

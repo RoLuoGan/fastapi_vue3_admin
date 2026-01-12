@@ -4,6 +4,7 @@
 
 import { ref, computed } from 'vue'
 import AIAgentAPI from '@/api/operations/aiagent'
+import type { StreamChunk } from '@/api/operations/aiagent'
 import { ElMessage } from 'element-plus'
 
 export interface Message {
@@ -11,6 +12,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   created_at?: string
+  isStreaming?: boolean  // 是否正在流式输出
 }
 
 export function useChat() {
@@ -19,6 +21,7 @@ export function useChat() {
   const loading = ref(false)
   const inputMessage = ref('')
   const abortController = ref<AbortController | null>(null)
+  const streamingContent = ref('')  // 当前正在流式输出的内容
 
   console.log('[useChat] 初始化聊天 composable')
 
@@ -99,10 +102,10 @@ export function useChat() {
     }
   }
 
-  // 发送消息
+  // 发送消息（流式）
   const sendMsg = async (content?: string) => {
     const msgContent = content || inputMessage.value
-    console.log('[useChat] 开始发送消息, content:', msgContent)
+    console.log('[useChat] 开始发送消息（流式）, content:', msgContent)
     
     if (!msgContent.trim()) {
       console.warn('[useChat] 消息内容为空')
@@ -129,8 +132,19 @@ export function useChat() {
     messages.value.push(userMessage)
     console.log('[useChat] 已添加用户消息到列表')
 
+    // 添加空的助手消息，用于流式填充
+    const assistantMessage: Message = {
+      role: 'assistant',
+      content: '',
+      created_at: new Date().toISOString(),
+      isStreaming: true
+    }
+    messages.value.push(assistantMessage)
+    const assistantMsgIndex = messages.value.length - 1
+
     // 清空输入框
     inputMessage.value = ''
+    streamingContent.value = ''
 
     // 显示加载状态
     loading.value = true
@@ -138,64 +152,91 @@ export function useChat() {
     // 创建 AbortController 用于取消请求
     abortController.value = new AbortController()
 
-    try {
-      const requestData = {
-        session_id: currentSessionId.value!,
-        message: msgContent
-      }
-      console.log('[useChat] 发送消息请求数据:', requestData)
-      
-      const res = await AIAgentAPI.sendMessage(requestData, {
-        signal: abortController.value.signal
-      })
-      console.log('[useChat] 发送消息响应:', res)
-      console.log('[useChat] 响应数据详情:', JSON.stringify(res, null, 2))
-
-      if (res.data.code === 0) {
-        // 添加AI回复
-        const assistantMessage: Message = {
-          id: res.data.data.message_id,
-          role: res.data.data.role as 'assistant',
-          content: res.data.data.content,
-          created_at: new Date().toISOString()
-        }
-        messages.value.push(assistantMessage)
-        console.log('[useChat] 消息发送成功，已添加助手回复')
-      } else {
-        console.error('[useChat] 发送消息失败, code:', res.data.code, 'message:', res.data.msg)
-        ElMessage.error(res.data.msg || '发送失败')
-        // 移除用户消息
-        messages.value.pop()
-      }
-    } catch (error: any) {
-      // 如果是取消请求，不显示错误
-      if (error.name === 'AbortError' || error.message?.includes('aborted') || error.code === 'ERR_CANCELED') {
-        console.log('[useChat] 请求已取消')
-        // 移除用户消息
-        if (messages.value.length > 0 && messages.value[messages.value.length - 1].role === 'user') {
-          messages.value.pop()
-        }
-        return
-      }
-      console.error('[useChat] 发送消息异常:', error)
-      console.error('[useChat] 错误详情:', {
-        message: error?.message,
-        response: error?.response,
-        data: error?.response?.data,
-        status: error?.response?.status,
-        statusText: error?.response?.statusText,
-        config: error?.config,
-        stack: error?.stack
-      })
-      ElMessage.error('发送消息失败: ' + (error?.message || '未知错误'))
-      // 移除用户消息
-      if (messages.value.length > 0 && messages.value[messages.value.length - 1].role === 'user') {
-        messages.value.pop()
-      }
-    } finally {
-      loading.value = false
-      abortController.value = null
+    const requestData = {
+      session_id: currentSessionId.value!,
+      message: msgContent
     }
+    console.log('[useChat] 发送消息请求数据（流式）:', requestData)
+    
+    // 用户消息的索引（在助手消息之前）
+    const userMsgIndex = assistantMsgIndex - 1
+
+    // 辅助函数：更新用户消息ID
+    const updateUserMessageId = (messageId: number) => {
+      messages.value[userMsgIndex] = {
+        ...messages.value[userMsgIndex],
+        id: messageId
+      }
+    }
+
+    // 辅助函数：更新助手消息并触发 Vue 响应式
+    const updateAssistantMessage = (content: string, isStreaming: boolean = true, messageId?: number) => {
+      messages.value[assistantMsgIndex] = {
+        ...messages.value[assistantMsgIndex],
+        content,
+        isStreaming,
+        ...(messageId ? { id: messageId } : {})
+      }
+    }
+
+    await AIAgentAPI.sendMessageStream(
+      requestData,
+      {
+        onChunk: (chunk: StreamChunk) => {
+          console.log('[useChat] 收到流式块:', chunk)
+          if (chunk.type === 'user_saved' && chunk.message_id) {
+            // 用户消息已保存到数据库，更新本地消息ID
+            console.log('[useChat] 用户消息已保存, ID:', chunk.message_id)
+            updateUserMessageId(chunk.message_id)
+          } else if (chunk.type === 'text' && chunk.content) {
+            // 追加内容到助手消息
+            streamingContent.value += chunk.content
+            // 使用替换整个对象的方式触发 Vue 响应式更新
+            updateAssistantMessage(streamingContent.value)
+          } else if (chunk.type === 'tool_start') {
+            // 工具调用开始
+            const toolInfo = `\n🔧 正在调用工具: ${chunk.tool}\n`
+            streamingContent.value += toolInfo
+            updateAssistantMessage(streamingContent.value)
+          } else if (chunk.type === 'tool_end') {
+            // 工具调用结束
+            const toolResult = `✅ 工具执行完成\n`
+            streamingContent.value += toolResult
+            updateAssistantMessage(streamingContent.value)
+          } else if (chunk.type === 'complete') {
+            // AI消息已保存到数据库
+            console.log('[useChat] AI消息已保存, ID:', chunk.message_id)
+            updateAssistantMessage(streamingContent.value, false, chunk.message_id)
+            loading.value = false
+            abortController.value = null
+          }
+        },
+        onComplete: () => {
+          // 流结束（备用处理，正常情况由 complete chunk 处理）
+          console.log('[useChat] 流式连接关闭')
+          if (loading.value) {
+            updateAssistantMessage(streamingContent.value, false)
+            loading.value = false
+            abortController.value = null
+          }
+        },
+        onError: (error: string) => {
+          console.error('[useChat] 流式响应错误:', error)
+          // 如果没有内容，移除助手消息
+          if (!streamingContent.value) {
+            messages.value.splice(assistantMsgIndex, 1)
+            // 也移除用户消息
+            messages.value.pop()
+          } else {
+            updateAssistantMessage(streamingContent.value + `\n\n❌ 错误: ${error}`, false)
+          }
+          ElMessage.error('发送消息失败: ' + error)
+          loading.value = false
+          abortController.value = null
+        }
+      },
+      abortController.value.signal
+    )
   }
 
   // 停止发送消息
@@ -203,15 +244,26 @@ export function useChat() {
     console.log('[useChat] 停止发送消息')
     if (abortController.value) {
       abortController.value.abort()
-      loading.value = false
       abortController.value = null
     }
+    // 如果有正在流式输出的消息，标记为完成
+    const lastMsg = messages.value[messages.value.length - 1]
+    if (lastMsg && lastMsg.isStreaming) {
+      lastMsg.isStreaming = false
+      if (!lastMsg.content) {
+        // 如果没有内容，移除空消息
+        messages.value.pop()
+      }
+    }
+    loading.value = false
+    streamingContent.value = ''
   }
 
   // 清空当前会话
   const clearSession = () => {
     currentSessionId.value = null
     messages.value = []
+    streamingContent.value = ''
     if (abortController.value) {
       abortController.value.abort()
       abortController.value = null
@@ -224,6 +276,7 @@ export function useChat() {
     messages,
     loading,
     inputMessage,
+    streamingContent,
     createNewSession,
     loadHistory,
     sendMsg,

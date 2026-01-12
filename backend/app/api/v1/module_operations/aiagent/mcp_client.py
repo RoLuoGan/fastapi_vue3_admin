@@ -4,14 +4,13 @@ MCP客户端封装
 使用官方 MCP SDK 的 streamable-http 客户端
 """
 
-import os
-import logging
 from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
 
 from mcp import ClientSession
 
-logger = logging.getLogger(__name__)
+from app.core.logger import logger
+from app.config.setting import settings
 
 
 class MCPClient:
@@ -22,20 +21,13 @@ class MCPClient:
         初始化MCP客户端
         
         Args:
-            server_url: MCP服务器URL（可选，默认从环境变量获取）
+            server_url: MCP服务器URL（可选，默认从配置获取）
             user_id: 用户ID（可选）
         """
-        # 如果没有提供URL，优先使用环境变量配置的独立MCP服务器
+        # 如果没有提供URL，使用配置文件中的设置
         if server_url is None:
-            # 优先使用独立MCP服务器URL
-            mcp_server_url = os.getenv('MCP_SERVER_URL')
-            if mcp_server_url:
-                self.server_url = mcp_server_url.rstrip('/')
-                logger.info(f"使用独立MCP服务器: {self.server_url}")
-            else:
-                # 默认使用 localhost:8001/mcp
-                self.server_url = "http://localhost:8001/mcp"
-                logger.warning(f"MCP_SERVER_URL 未设置，使用默认值: {self.server_url}")
+            self.server_url = settings.MCP_SERVER_URL
+            logger.info(f"使用配置的MCP服务器: {self.server_url}")
         else:
             self.server_url = server_url
             logger.info(f"使用指定的MCP服务器: {self.server_url}")
@@ -47,6 +39,10 @@ class MCPClient:
     @asynccontextmanager
     async def connect(self):
         """连接到MCP服务器"""
+        # 检查 MCP 客户端是否启用
+        if not settings.MCP_CLIENT_ENABLE:
+            raise RuntimeError("MCP 客户端未启用，请在配置中设置 MCP_CLIENT_ENABLE=True")
+        
         try:
             logger.info(f"连接到MCP服务器: {self.server_url}")
             logger.info(f"用户ID: {self.user_id}")
@@ -92,7 +88,7 @@ class MCPClient:
                     yield self
             
         except Exception as e:
-            logger.error(f"MCP客户端连接失败: {str(e)}", exc_info=True)
+            logger.error(f"MCP客户端连接失败: {str(e)}")
             logger.error(f"服务器URL: {self.server_url}")
             logger.error(f"用户ID: {self.user_id}")
             raise
