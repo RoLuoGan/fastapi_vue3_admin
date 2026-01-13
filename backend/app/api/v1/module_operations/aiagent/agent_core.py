@@ -13,7 +13,7 @@ from datetime import datetime
 
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage, ToolMessage, AIMessageChunk
 from langchain_core.tools import BaseTool
 from langchain_core.runnables import RunnablePassthrough
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -24,46 +24,9 @@ from app.api.v1.module_system.auth.schema import AuthSchema
 from .rule_engine import RuleEngine
 from .crud import AIAgentCRUD
 from .models import SessionStatus, MessageRole, OperationStatus
+from .prompts import OPERATIONS_ASSISTANT_PROMPT
 
 logger = logging.getLogger(__name__)
-
-
-# DeepSeek系统提示词
-DEEPSEEK_SYSTEM_PROMPT = """你是一个专业的运维管理助手，负责帮助用户管理服务器、执行任务、部署服务等。
-
-## 核心原则
-1. **安全第一**：所有删除、重启、部署等操作都需要明确告知用户并等待确认
-2. **精确理解**：确保理解用户意图后再调用工具，不确定时主动询问
-3. **结构化输出**：使用清晰的格式展示结果（如表格、列表）
-4. **错误处理**：遇到错误时，提供明确的解决建议
-
-## 工具使用规范
-- 查询类操作（list、get、search）：直接执行，无需确认
-- 创建类操作（create）：先确认参数，再执行
-- 修改类操作（update）：必须确认影响范围
-- 删除类操作（delete）：必须明确提示风险并获得确认
-- 批量操作：必须显示具体影响的资源列表
-- 任务执行（deploy、restart）：必须确认环境和影响范围
-
-## 操作流程
-1. 解析用户指令，提取关键信息（操作类型、目标资源、参数）
-2. 如果信息不完整，主动询问缺失的参数
-3. 对于敏感操作，明确说明影响并请求确认
-4. 调用对应工具执行操作
-5. 格式化展示结果，并提供后续建议
-
-## 示例对话
-用户：重启生产环境的 web 服务
-助手：我理解您要重启生产环境的 web 服务。为了确保安全，请确认以下信息：
-- 目标环境：production
-- 服务模块：web
-- 影响节点：[显示节点列表]
-- 预计停机时间：约 30 秒
-是否继续执行？
-
-当前用户：{username}
-当前时间：{current_time}
-"""
 
 
 class AIAgent:
@@ -96,7 +59,10 @@ class AIAgent:
         # 初始化工具列表（从MCP客户端获取）
         self.tools: List[BaseTool] = []
         
-        # MCP服务器配置（如果需要连接多个MCP服务器）
+        # 工具名称集合（用于验证，防止调用不存在的工具）
+        self.available_tool_names: set = set()
+        
+        # MCP服务器配置
         self.mcp_servers_config = {}
         self.mcp_adapter_client: Optional[MultiServerMCPClient] = None
         
@@ -146,26 +112,30 @@ class AIAgent:
             # 创建MCP适配器客户端
             self.mcp_adapter_client = MultiServerMCPClient(mcp_servers_config)
             
-            # 获取LangChain兼容的工具
+            # 获取LangChain兼容的工具（这些工具会通过 bind_tools 绑定给 LLM）
             self.tools = await self.mcp_adapter_client.get_tools()
             
-            logger.info(f"已加载 {len(self.tools)} 个MCP工具")
+            # 存储工具名称集合（用于安全验证，防止调用不存在的工具）
+            self.available_tool_names = {tool.name for tool in self.tools}
+            
+            logger.info(f"已加载 {len(self.tools)} 个MCP工具: {list(self.available_tool_names)}")
             
         except Exception as e:
             logger.error(f"初始化MCP工具失败: {str(e)}")
             self.tools = []
+            self.available_tool_names = set()
             logger.warning("MCP工具初始化失败，将不使用工具")
     
     def _init_agent(self):
-        """初始化Agent - 使用简化的实现"""
-        # 构建Prompt
+        """初始化Agent"""
+        # 构建Prompt（从 prompts.py 导入）
         self.prompt = ChatPromptTemplate.from_messages([
-            ("system", DEEPSEEK_SYSTEM_PROMPT),
+            ("system", OPERATIONS_ASSISTANT_PROMPT),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}")
         ])
         
-        # 初始化工具
+        # 初始化工具（异步加载MCP工具）
         asyncio.create_task(self._init_tools())
     
     async def _call_mcp_tool(self, tool_name: str, arguments: Any) -> str:
@@ -187,6 +157,11 @@ class AIAgent:
                 arguments = {"input": arguments}
         
         logger.info(f"准备调用MCP工具: {tool_name}, 参数: {arguments}")
+        
+        # 🔒 安全验证：检查工具是否存在
+        if tool_name not in self.available_tool_names:
+            logger.warning(f"尝试调用不存在的工具: {tool_name}, 可用工具: {self.available_tool_names}")
+            return f"❌ 错误：工具 '{tool_name}' 不存在。当前可用工具：{', '.join(sorted(self.available_tool_names))}"
         
         # 规则检查：是否需要确认
         need_confirm, reason = await self.rule_engine.check_operation(
@@ -291,7 +266,7 @@ class AIAgent:
             current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
         
-        # 使用工具绑定
+        # 使用 bind_tools 绑定工具（LLM会自动知道可用工具）
         llm_with_tools = self.llm.bind_tools(self.tools)
         
         # 调用LLM
@@ -390,42 +365,89 @@ class AIAgent:
             while iteration < max_iterations:
                 iteration += 1
                 
-                # 流式调用LLM
+                # 流式调用LLM，累积所有chunk以获取完整的工具调用信息
                 current_content = ""
-                tool_calls = []
+                accumulated_chunk = None
                 
                 async for chunk in llm_with_tools.astream(formatted_prompt):
-                    # 检查是否有工具调用
-                    if hasattr(chunk, 'tool_calls') and chunk.tool_calls:
-                        tool_calls = chunk.tool_calls
-                        break
+                    # 累积chunk以构建完整的AIMessage
+                    if accumulated_chunk is None:
+                        accumulated_chunk = chunk
+                    else:
+                        # 合并chunk（AIMessageChunk支持合并）
+                        if isinstance(accumulated_chunk, AIMessageChunk) and isinstance(chunk, AIMessageChunk):
+                            accumulated_chunk = accumulated_chunk + chunk
+                        else:
+                            # 如果不是AIMessageChunk，尝试合并属性
+                            if hasattr(chunk, 'content') and chunk.content:
+                                if hasattr(accumulated_chunk, 'content'):
+                                    accumulated_chunk.content = (accumulated_chunk.content or "") + (chunk.content or "")
+                                else:
+                                    accumulated_chunk = chunk
                     
-                    # 累积内容
+                    # 实时输出文本内容
                     if hasattr(chunk, 'content') and chunk.content:
                         current_content += chunk.content
                         full_content += chunk.content  # 只添加新内容，不重复添加
                         yield {"type": "text", "content": chunk.content}
                 
+                # 检查完整的消息中是否有工具调用
+                tool_calls = []
+                if accumulated_chunk:
+                    # 尝试多种方式获取tool_calls
+                    if hasattr(accumulated_chunk, 'tool_calls') and accumulated_chunk.tool_calls:
+                        tool_calls = accumulated_chunk.tool_calls
+                    elif hasattr(accumulated_chunk, 'tool_calls') and callable(getattr(accumulated_chunk, 'tool_calls', None)):
+                        try:
+                            tool_calls = accumulated_chunk.tool_calls()
+                        except:
+                            pass
+                
+                logger.debug(f"工具调用检查: tool_calls={tool_calls}, current_content={current_content[:100]}")
+                
                 # 如果有工具调用
                 if tool_calls:
-                    # 通知前端工具调用开始
+                    logger.info(f"检测到工具调用: {tool_calls}")
+                    # 通知前端工具调用（使用单独的事件类型）
                     for tool_call in tool_calls:
-                        tool_name = tool_call.get("name")
-                        tool_args = tool_call.get("args", {})
-                        yield {
-                            "type": "tool_start",
-                            "tool": tool_name,
-                            "input": tool_args
-                        }
+                        # 处理不同的tool_call格式
+                        if isinstance(tool_call, dict):
+                            tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name", "")
+                            tool_args = tool_call.get("args") or tool_call.get("function", {}).get("arguments", {})
+                            tool_call_id = tool_call.get("id") or tool_call.get("function", {}).get("id", "")
+                            # 如果args是字符串，尝试解析为JSON
+                            if isinstance(tool_args, str):
+                                try:
+                                    tool_args = json.loads(tool_args)
+                                except:
+                                    tool_args = {}
+                        else:
+                            # 如果是对象，尝试获取属性
+                            tool_name = getattr(tool_call, 'name', '') or getattr(tool_call, 'function', {}).get('name', '')
+                            tool_args = getattr(tool_call, 'args', {}) or getattr(tool_call, 'function', {}).get('arguments', {})
+                            tool_call_id = getattr(tool_call, 'id', '') or getattr(tool_call, 'function', {}).get('id', '')
+                            if isinstance(tool_args, str):
+                                try:
+                                    tool_args = json.loads(tool_args)
+                                except:
+                                    tool_args = {}
                         
                         # 调用工具
                         tool_result = await self._call_mcp_tool(tool_name, tool_args)
                         
-                        # 通知前端工具调用结束
+                        # 判断工具调用是否成功（通过返回结果判断）
+                        # 如果返回结果以 ❌ 或 ⚠️ 开头，则认为是失败或需要确认
+                        tool_result_str = str(tool_result) if tool_result else ""
+                        is_success = not (tool_result_str.startswith("❌") or tool_result_str.startswith("⚠️"))
+                        
+                        # 使用 mcp_tool_call 事件类型返回完整的工具调用信息
                         yield {
-                            "type": "tool_end",
+                            "type": "mcp_tool_call",
                             "tool": tool_name,
-                            "output": tool_result
+                            "tool_call_id": tool_call_id,
+                            "input": tool_args,
+                            "output": tool_result,
+                            "success": is_success
                         }
                         
                         # 将工具结果添加到消息历史

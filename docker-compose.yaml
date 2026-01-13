@@ -74,6 +74,26 @@ services:
       - app_network
     command: ["devops-admin", "celery-worker", "--env=prod", "--queue=scripts", "--concurrency=4"]
   
+  # mcp-server服务
+  mcp-server:
+    container_name: mcp-server
+    build:
+      context: ./
+      dockerfile: ./devops/backend/Dockerfile
+    image: backend:latest
+    restart: always
+    environment:
+      TZ: "Asia/Shanghai"
+    volumes:
+      - ./backend:/home
+    depends_on:
+      - mysql
+      - redis
+    networks:
+      - app_network
+    command: ["devops-admin", "mcp-server", "--env=prod""]
+  
+
   # 前端nginx服务
   nginx:
     container_name: nginx

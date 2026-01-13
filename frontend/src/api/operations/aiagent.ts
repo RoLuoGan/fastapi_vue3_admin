@@ -380,13 +380,24 @@ export interface RuleUpdateRequest {
   description?: string;
 }
 
+/** MCP工具调用信息 */
+export interface McpToolCall {
+  tool: string;
+  tool_call_id?: string;
+  input: any;
+  output: string;
+  success: boolean;
+}
+
 /** 流式响应块 */
 export interface StreamChunk {
-  type: "text" | "tool_start" | "tool_end" | "complete" | "error" | "user_saved";
+  type: "text" | "tool_start" | "tool_end" | "mcp_tool_call" | "complete" | "error" | "user_saved";
   content?: string;
   tool?: string;
-  input?: string;
+  tool_call_id?: string;
+  input?: any;
   output?: string;
   error?: string;
+  success?: boolean;
   message_id?: number;  // 消息保存后返回的ID
 }

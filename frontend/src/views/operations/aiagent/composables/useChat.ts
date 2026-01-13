@@ -4,7 +4,7 @@
 
 import { ref, computed } from 'vue'
 import AIAgentAPI from '@/api/operations/aiagent'
-import type { StreamChunk } from '@/api/operations/aiagent'
+import type { StreamChunk, McpToolCall } from '@/api/operations/aiagent'
 import { ElMessage } from 'element-plus'
 
 export interface Message {
@@ -13,6 +13,7 @@ export interface Message {
   content: string
   created_at?: string
   isStreaming?: boolean  // 是否正在流式输出
+  toolCalls?: McpToolCall[]  // MCP工具调用列表
 }
 
 export function useChat() {
@@ -170,12 +171,13 @@ export function useChat() {
     }
 
     // 辅助函数：更新助手消息并触发 Vue 响应式
-    const updateAssistantMessage = (content: string, isStreaming: boolean = true, messageId?: number) => {
+    const updateAssistantMessage = (content: string, isStreaming: boolean = true, messageId?: number, toolCalls?: McpToolCall[]) => {
       messages.value[assistantMsgIndex] = {
         ...messages.value[assistantMsgIndex],
         content,
         isStreaming,
-        ...(messageId ? { id: messageId } : {})
+        ...(messageId ? { id: messageId } : {}),
+        ...(toolCalls ? { toolCalls } : {})
       }
     }
 
@@ -193,20 +195,35 @@ export function useChat() {
             streamingContent.value += chunk.content
             // 使用替换整个对象的方式触发 Vue 响应式更新
             updateAssistantMessage(streamingContent.value)
+          } else if (chunk.type === 'mcp_tool_call') {
+            // MCP工具调用（新的事件类型）
+            const currentMsg = messages.value[assistantMsgIndex]
+            const existingToolCalls = currentMsg.toolCalls || []
+            const newToolCall: McpToolCall = {
+              tool: chunk.tool || '',
+              tool_call_id: chunk.tool_call_id,
+              input: chunk.input || {},
+              output: chunk.output || '',
+              success: chunk.success !== false
+            }
+            const updatedToolCalls = [...existingToolCalls, newToolCall]
+            updateAssistantMessage(streamingContent.value, true, undefined, updatedToolCalls)
+            console.log('[useChat] MCP工具调用已记录:', newToolCall)
           } else if (chunk.type === 'tool_start') {
-            // 工具调用开始
+            // 工具调用开始（向后兼容）
             const toolInfo = `\n🔧 正在调用工具: ${chunk.tool}\n`
             streamingContent.value += toolInfo
             updateAssistantMessage(streamingContent.value)
           } else if (chunk.type === 'tool_end') {
-            // 工具调用结束
+            // 工具调用结束（向后兼容）
             const toolResult = `✅ 工具执行完成\n`
             streamingContent.value += toolResult
             updateAssistantMessage(streamingContent.value)
           } else if (chunk.type === 'complete') {
             // AI消息已保存到数据库
             console.log('[useChat] AI消息已保存, ID:', chunk.message_id)
-            updateAssistantMessage(streamingContent.value, false, chunk.message_id)
+            const currentMsg = messages.value[assistantMsgIndex]
+            updateAssistantMessage(streamingContent.value, false, chunk.message_id, currentMsg.toolCalls)
             loading.value = false
             abortController.value = null
           }
@@ -215,7 +232,8 @@ export function useChat() {
           // 流结束（备用处理，正常情况由 complete chunk 处理）
           console.log('[useChat] 流式连接关闭')
           if (loading.value) {
-            updateAssistantMessage(streamingContent.value, false)
+            const currentMsg = messages.value[assistantMsgIndex]
+            updateAssistantMessage(streamingContent.value, false, undefined, currentMsg?.toolCalls)
             loading.value = false
             abortController.value = null
           }
