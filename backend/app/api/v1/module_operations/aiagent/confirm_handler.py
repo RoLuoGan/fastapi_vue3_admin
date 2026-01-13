@@ -2,6 +2,7 @@
 """
 确认处理器
 处理需要用户确认的敏感操作
+使用 LangChain MCP Adapters 统一 MCP 客户端
 """
 
 import asyncio
@@ -10,10 +11,11 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 
 from app.api.v1.module_system.auth.schema import AuthSchema
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from .crud import AIAgentCRUD
 from .models import OperationStatus
-from .mcp_client import MCPClient
+from app.config.setting import settings
 
 logger = logging.getLogger(__name__)
 
@@ -26,20 +28,36 @@ class ConfirmTimeout(Exception):
 class ConfirmHandler:
     """确认处理器"""
     
-    def __init__(self, auth: AuthSchema, mcp_client: MCPClient):
+    def __init__(self, auth: AuthSchema):
         """
         初始化确认处理器
         
         Args:
             auth: 认证信息
-            mcp_client: MCP客户端
         """
         self.auth = auth
-        self.mcp_client = mcp_client
         self.crud = AIAgentCRUD(auth)
+        
+        # MCP 适配器客户端（统一使用 MultiServerMCPClient）
+        self.mcp_client: Optional[MultiServerMCPClient] = None
         
         # 待确认操作的Future字典 {operation_id: Future}
         self._pending_confirms: Dict[int, asyncio.Future] = {}
+    
+    async def _init_mcp_client(self):
+        """初始化 MCP 客户端"""
+        if self.mcp_client is None:
+            # 配置 MCP 服务器
+            mcp_servers_config = {
+                "operations-tools": {
+                    "url": settings.MCP_SERVER_URL,
+                    "transport": "streamable_http"
+                }
+            }
+            
+            # 创建 MCP 适配器客户端
+            self.mcp_client = MultiServerMCPClient(mcp_servers_config)
+            logger.info("ConfirmHandler: 已初始化 MultiServerMCPClient")
     
     async def request_confirm(
         self,
@@ -122,7 +140,7 @@ class ConfirmHandler:
                 confirmed_at=datetime.now()
             )
             
-            # 执行MCP工具调用
+            # 执行 MCP 工具调用（使用 MultiServerMCPClient）
             result = await self._execute_confirmed_operation(operation_log)
             
             # 通知等待的Future
@@ -158,7 +176,7 @@ class ConfirmHandler:
         operation_log
     ) -> Dict[str, Any]:
         """
-        执行已确认的操作
+        执行已确认的操作（使用 MultiServerMCPClient）
         
         Args:
             operation_log: 操作日志对象
@@ -167,14 +185,27 @@ class ConfirmHandler:
             执行结果
         """
         try:
-            # 调用MCP工具
-            result = await self.mcp_client.call_tool(
-                operation_log.tool_name,
-                operation_log.params
-            )
+            # 初始化 MCP 客户端
+            await self._init_mcp_client()
+            
+            # 获取工具
+            tools = await self.mcp_client.get_tools()
+            
+            # 查找对应的工具
+            tool = None
+            for t in tools:
+                if t.name == operation_log.tool_name:
+                    tool = t
+                    break
+            
+            if not tool:
+                raise ValueError(f"工具不存在: {operation_log.tool_name}")
+            
+            # 调用工具
+            result = await tool.ainvoke(operation_log.params)
             
             # 更新操作日志
-            if result.get("success"):
+            if isinstance(result, dict) and result.get("success"):
                 await self.crud.update_operation_log(
                     operation_log.id,
                     status=OperationStatus.SUCCESS,
@@ -185,11 +216,14 @@ class ConfirmHandler:
                 await self.crud.update_operation_log(
                     operation_log.id,
                     status=OperationStatus.FAILED,
-                    error_message=result.get("error"),
+                    error_message=str(result) if not isinstance(result, dict) else result.get("error", "未知错误"),
                     executed_at=datetime.now()
                 )
             
-            return result
+            return {
+                "success": True,
+                "result": result
+            }
         
         except Exception as e:
             logger.error(f"执行确认操作失败: {str(e)}")
@@ -246,3 +280,14 @@ class ConfirmHandler:
             待确认操作列表
         """
         return await self.crud.get_pending_operations(session_id)
+    
+    async def close(self):
+        """清理资源"""
+        if self.mcp_client:
+            try:
+                await self.mcp_client.close()
+                logger.info("ConfirmHandler: 已关闭 MultiServerMCPClient")
+            except Exception as e:
+                logger.error(f"关闭 MCP 客户端失败: {str(e)}")
+            finally:
+                self.mcp_client = None

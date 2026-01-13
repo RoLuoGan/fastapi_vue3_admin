@@ -190,7 +190,8 @@ def register_task_tools(mcp_server: Server, auth: AuthSchema):
                 auth=auth,
                 page_no=arguments.get("page", 1),
                 page_size=arguments.get("page_size", 10),
-                search=search
+                search=search,
+                order_by=[{"created_at": "desc"}]
             )
             return [TextContent(
                 type="text",

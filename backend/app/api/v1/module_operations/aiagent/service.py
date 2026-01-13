@@ -14,7 +14,6 @@ from app.core.exceptions import CustomException
 
 from .crud import AIAgentCRUD
 from .agent_core import AIAgent
-from .mcp_client import MCPClient
 from .confirm_handler import ConfirmHandler
 from .rule_engine import RuleEngine
 from .schema import (
@@ -96,27 +95,22 @@ class AIAgentService:
         if session.status != SessionStatus.ACTIVE.value:
             raise CustomException(msg=f"会话状态不正确: {session.status}")
         
-        # 创建MCP客户端（使用HTTP/SSE模式）
-        mcp_client = MCPClient(user_id=auth.user.id)
+        # 创建AI Agent（不传递MCP客户端，让Agent内部使用MultiServerMCPClient）
+        agent = AIAgent(
+            auth=auth,
+            session_id=request.session_id,
+            llm_model=session.llm_model
+        )
         
-        async with mcp_client.connect():
-            # 创建AI Agent
-            agent = AIAgent(
-                auth=auth,
-                session_id=request.session_id,
-                mcp_client=mcp_client,
-                llm_model=session.llm_model
-            )
-            
-            # 处理消息
-            result = await agent.chat(request.message)
-            
-            return {
-                "session_id": request.session_id,
-                "message_id": result["message_id"],
-                "content": result["content"],
-                "role": MessageRole.ASSISTANT.value
-            }
+        # 处理消息
+        result = await agent.chat(request.message)
+        
+        return {
+            "session_id": request.session_id,
+            "message_id": result["message_id"],
+            "content": result["content"],
+            "role": MessageRole.ASSISTANT.value
+        }
     
     @classmethod
     async def chat_stream(
@@ -146,22 +140,17 @@ class AIAgentService:
             yield f"data: {{'type':'error','error':'会话状态不正确'}}\n\n"
             return
         
-        # 创建MCP客户端（使用HTTP/SSE模式）
-        mcp_client = MCPClient(user_id=auth.user.id)
+        # 创建AI Agent（不传递MCP客户端，让Agent内部使用MultiServerMCPClient）
+        agent = AIAgent(
+            auth=auth,
+            session_id=request.session_id,
+            llm_model=session.llm_model
+        )
         
-        async with mcp_client.connect():
-            # 创建AI Agent
-            agent = AIAgent(
-                auth=auth,
-                session_id=request.session_id,
-                mcp_client=mcp_client,
-                llm_model=session.llm_model
-            )
-            
-            # 流式处理
-            async for chunk in agent.chat_stream(request.message):
-                import json
-                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        # 流式处理
+        async for chunk in agent.chat_stream(request.message):
+            import json
+            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
     
     @classmethod
     async def confirm_operation(
@@ -191,25 +180,21 @@ class AIAgentService:
         if session.user_id != auth.user.id:
             raise CustomException(msg="无权确认该操作")
         
-        # 创建MCP客户端（使用HTTP/SSE模式）
-        mcp_client = MCPClient(user_id=auth.user.id)
+        # 创建确认处理器（不传递 MCP 客户端，使用 MultiServerMCPClient）
+        confirm_handler = ConfirmHandler(auth)
         
-        async with mcp_client.connect():
-            # 创建确认处理器
-            confirm_handler = ConfirmHandler(auth, mcp_client)
-            
-            # 执行确认
-            result = await confirm_handler.confirm_operation(
-                operation_id=request.operation_id,
-                confirmed=request.confirmed,
-                comment=request.comment
-            )
-            
-            return {
-                "operation_id": request.operation_id,
-                "status": "success" if result.get("success") else "failed",
-                "result": result
-            }
+        # 执行确认
+        result = await confirm_handler.confirm_operation(
+            operation_id=request.operation_id,
+            confirmed=request.confirmed,
+            comment=request.comment
+        )
+        
+        return {
+            "operation_id": request.operation_id,
+            "status": "success" if result.get("success") else "failed",
+            "result": result
+        }
     
     @classmethod
     async def takeover_session(

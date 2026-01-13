@@ -2,6 +2,7 @@
 """
 AI Agent 核心逻辑
 基于LangChain实现，集成MCP客户端调用运维工具
+使用官方LangChain MCP Adapters和流式工具调用
 """
 
 import json
@@ -12,16 +13,14 @@ from datetime import datetime
 
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage, BaseMessage
-from langchain_core.tools import Tool
-from langchain_core.callbacks.base import AsyncCallbackHandler
-from langchain_core.language_models import BaseChatModel
-from langchain_core.runnables import Runnable, RunnablePassthrough
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, BaseMessage, ToolMessage
+from langchain_core.tools import BaseTool
+from langchain_core.runnables import RunnablePassthrough
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from app.config.setting import settings
 from app.api.v1.module_system.auth.schema import AuthSchema
 
-from .mcp_client import MCPClient
 from .rule_engine import RuleEngine
 from .crud import AIAgentCRUD
 from .models import SessionStatus, MessageRole, OperationStatus
@@ -67,29 +66,6 @@ DEEPSEEK_SYSTEM_PROMPT = """你是一个专业的运维管理助手，负责帮�
 """
 
 
-class StreamingCallbackHandler(AsyncCallbackHandler):
-    """流式回调处理器，用于实时输出Agent的思考和执行过程"""
-    
-    def __init__(self, queue: asyncio.Queue):
-        self.queue = queue
-    
-    async def on_llm_new_token(self, token: str, **kwargs) -> None:
-        """LLM生成新token时"""
-        await self.queue.put({"type": "token", "content": token})
-    
-    async def on_tool_start(self, serialized: Dict[str, Any], input_str: str, **kwargs) -> None:
-        """工具调用开始时"""
-        await self.queue.put({
-            "type": "tool_start",
-            "tool": serialized.get("name"),
-            "input": input_str
-        })
-    
-    async def on_tool_end(self, output: str, **kwargs) -> None:
-        """工具调用结束时"""
-        await self.queue.put({"type": "tool_end", "output": output})
-
-
 class AIAgent:
     """AI Agent核心类"""
     
@@ -97,7 +73,6 @@ class AIAgent:
         self,
         auth: AuthSchema,
         session_id: int,
-        mcp_client: MCPClient,
         llm_model: str = "deepseek"
     ):
         """
@@ -106,12 +81,10 @@ class AIAgent:
         Args:
             auth: 认证信息
             session_id: 会话ID
-            mcp_client: MCP客户端
             llm_model: LLM模型名称
         """
         self.auth = auth
         self.session_id = session_id
-        self.mcp_client = mcp_client
         self.llm_model = llm_model
         
         self.crud = AIAgentCRUD(auth)
@@ -120,12 +93,14 @@ class AIAgent:
         # 初始化LLM
         self.llm = self._init_llm()
         
-        # 初始化工具
-        self.tools = []
-        self._init_tools()
+        # 初始化工具列表（从MCP客户端获取）
+        self.tools: List[BaseTool] = []
+        
+        # MCP服务器配置（如果需要连接多个MCP服务器）
+        self.mcp_servers_config = {}
+        self.mcp_adapter_client: Optional[MultiServerMCPClient] = None
         
         # 初始化Agent
-        self.agent_executor = None
         self._init_agent()
     
     def _init_llm(self) -> ChatOpenAI:
@@ -157,25 +132,45 @@ class AIAgent:
                 streaming=True
             )
     
-    def _init_tools(self):
+    async def _init_tools(self):
         """初始化工具列表（从MCP客户端获取）"""
-        mcp_tools = self.mcp_client.get_tools()
+        try:
+            # 配置MCP服务器
+            mcp_servers_config = {
+                "operations-tools": {
+                    "url": settings.MCP_SERVER_URL,
+                    "transport": "streamable_http"
+                }
+            }
+            
+            # 创建MCP适配器客户端
+            self.mcp_adapter_client = MultiServerMCPClient(mcp_servers_config)
+            
+            # 获取LangChain兼容的工具
+            self.tools = await self.mcp_adapter_client.get_tools()
+            
+            logger.info(f"已加载 {len(self.tools)} 个MCP工具")
+            
+        except Exception as e:
+            logger.error(f"初始化MCP工具失败: {str(e)}")
+            self.tools = []
+            logger.warning("MCP工具初始化失败，将不使用工具")
+    
+    def _init_agent(self):
+        """初始化Agent - 使用简化的实现"""
+        # 构建Prompt
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("system", DEEPSEEK_SYSTEM_PROMPT),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}")
+        ])
         
-        for mcp_tool in mcp_tools:
-            # 包装MCP工具为LangChain Tool
-            tool = Tool(
-                name=mcp_tool["name"],
-                description=mcp_tool["description"],
-                func=lambda args, name=mcp_tool["name"]: self._call_mcp_tool_sync(name, args),
-                coroutine=lambda args, name=mcp_tool["name"]: self._call_mcp_tool(name, args)
-            )
-            self.tools.append(tool)
-        
-        logger.info(f"已加载 {len(self.tools)} 个MCP工具")
+        # 初始化工具
+        asyncio.create_task(self._init_tools())
     
     async def _call_mcp_tool(self, tool_name: str, arguments: Any) -> str:
         """
-        调用MCP工具（异步）
+        调用MCP工具（使用 MultiServerMCPClient）
         
         Args:
             tool_name: 工具名称
@@ -197,7 +192,7 @@ class AIAgent:
         need_confirm, reason = await self.rule_engine.check_operation(
             operation_type=tool_name,
             params=arguments,
-            user=self.auth.current_user
+            user=self.auth.user
         )
         
         # 记录操作日志
@@ -216,45 +211,49 @@ class AIAgent:
         if need_confirm:
             return f"⚠️ 该操作需要确认：{reason}\n操作ID: {operation_log.id}\n请在前端确认后继续。"
         
-        # 调用MCP工具
-        result = await self.mcp_client.call_tool(tool_name, arguments)
-        
-        # 更新操作日志
-        if result.get("success"):
+        # 调用MCP工具（使用 MultiServerMCPClient）
+        try:
+            # 从工具列表中查找对应的工具
+            tool = None
+            for t in self.tools:
+                if t.name == tool_name:
+                    tool = t
+                    break
+            
+            if not tool:
+                raise ValueError(f"工具不存在: {tool_name}")
+            
+            # 调用工具
+            tool_result = await tool.ainvoke(arguments)
+            
+            # 更新操作日志
             await self.crud.update_operation_log(
                 operation_log.id,
                 status=OperationStatus.SUCCESS,
-                result=result,
+                result={"success": True, "result": tool_result},
                 executed_at=datetime.now()
             )
-            return result.get("result", "操作成功")
-        else:
+            
+            return str(tool_result)
+            
+        except Exception as e:
+            logger.error(f"调用MCP工具失败: {str(e)}")
+            
+            # 更新操作日志
             await self.crud.update_operation_log(
                 operation_log.id,
                 status=OperationStatus.FAILED,
-                error_message=result.get("error"),
+                error_message=str(e),
                 executed_at=datetime.now()
             )
-            return f"操作失败: {result.get('error')}"
+            
+            return f"操作失败: {str(e)}"
     
     def _call_mcp_tool_sync(self, tool_name: str, arguments: Any) -> str:
         """同步版本的工具调用（用于兼容）"""
         import asyncio
         loop = asyncio.get_event_loop()
         return loop.run_until_complete(self._call_mcp_tool(tool_name, arguments))
-    
-    def _init_agent(self):
-        """初始化Agent - 使用简化的实现"""
-        # 构建Prompt
-        self.prompt = ChatPromptTemplate.from_messages([
-            ("system", DEEPSEEK_SYSTEM_PROMPT),
-            MessagesPlaceholder(variable_name="chat_history"),
-            ("human", "{input}")
-        ])
-        
-        # 简化实现：直接使用 LLM，不使用 AgentExecutor
-        # 避免 langchain 版本兼容问题
-        self.agent_executor = None  # 设置为 None，后续在 chat 方法中直接调用 LLM
     
     async def chat(self, message: str) -> Dict[str, Any]:
         """
@@ -292,9 +291,35 @@ class AIAgent:
             current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
         
-        # 直接调用LLM
-        response = await self.llm.ainvoke(formatted_prompt)
+        # 使用工具绑定
+        llm_with_tools = self.llm.bind_tools(self.tools)
+        
+        # 调用LLM
+        response = await llm_with_tools.ainvoke(formatted_prompt)
         response_content = response.content
+        
+        # 处理工具调用
+        if hasattr(response, 'tool_calls') and response.tool_calls:
+            for tool_call in response.tool_calls:
+                tool_name = tool_call.get("name")
+                tool_args = tool_call.get("args", {})
+                
+                # 调用工具
+                tool_result = await self._call_mcp_tool(tool_name, tool_args)
+                
+                # 将工具结果添加到消息历史
+                chat_history.append(AIMessage(content="", tool_calls=[tool_call]))
+                chat_history.append(ToolMessage(content=tool_result, tool_call_id=tool_call.get("id")))
+                
+                # 重新调用LLM，传入工具结果
+                formatted_prompt = self.prompt.format_messages(
+                    chat_history=chat_history,
+                    input="",  # 工具调用后，input 应该为空，让 LLM 基于工具结果生成最终响应
+                    username=self.auth.user.username if self.auth.user else 'unknown',
+                    current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                )
+                response = await llm_with_tools.ainvoke(formatted_prompt)
+                response_content = response.content
         
         # 保存Assistant消息
         assistant_msg = await self.crud.create_message(
@@ -314,7 +339,7 @@ class AIAgent:
     
     async def chat_stream(self, message: str) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        处理用户消息（流式）
+        处理用户消息（流式，支持工具调用循环）
         
         Args:
             message: 用户消息
@@ -350,14 +375,77 @@ class AIAgent:
             current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
         
-        # 流式调用LLM
+        # 使用工具绑定
+        llm_with_tools = self.llm.bind_tools(self.tools)
+        
+        # 流式调用LLM，处理工具调用循环
         full_content = ""
         assistant_msg_id = None
+        
         try:
-            async for chunk in self.llm.astream(formatted_prompt):
-                if hasattr(chunk, 'content') and chunk.content:
-                    full_content += chunk.content
-                    yield {"type": "text", "content": chunk.content}
+            # 工具调用循环
+            max_iterations = 10  # 防止无限循环
+            iteration = 0
+            
+            while iteration < max_iterations:
+                iteration += 1
+                
+                # 流式调用LLM
+                current_content = ""
+                tool_calls = []
+                
+                async for chunk in llm_with_tools.astream(formatted_prompt):
+                    # 检查是否有工具调用
+                    if hasattr(chunk, 'tool_calls') and chunk.tool_calls:
+                        tool_calls = chunk.tool_calls
+                        break
+                    
+                    # 累积内容
+                    if hasattr(chunk, 'content') and chunk.content:
+                        current_content += chunk.content
+                        full_content += chunk.content  # 只添加新内容，不重复添加
+                        yield {"type": "text", "content": chunk.content}
+                
+                # 如果有工具调用
+                if tool_calls:
+                    # 通知前端工具调用开始
+                    for tool_call in tool_calls:
+                        tool_name = tool_call.get("name")
+                        tool_args = tool_call.get("args", {})
+                        yield {
+                            "type": "tool_start",
+                            "tool": tool_name,
+                            "input": tool_args
+                        }
+                        
+                        # 调用工具
+                        tool_result = await self._call_mcp_tool(tool_name, tool_args)
+                        
+                        # 通知前端工具调用结束
+                        yield {
+                            "type": "tool_end",
+                            "tool": tool_name,
+                            "output": tool_result
+                        }
+                        
+                        # 将工具结果添加到消息历史
+                        chat_history.append(AIMessage(content=current_content, tool_calls=[tool_call]))
+                        chat_history.append(ToolMessage(content=tool_result, tool_call_id=tool_call.get("id")))
+                        
+                        # 重新构建prompt，包含工具结果
+                        formatted_prompt = self.prompt.format_messages(
+                            chat_history=chat_history,
+                            input="",  # 工具调用后，input 应该为空，让 LLM 基于工具结果生成最终响应
+                            username=self.auth.user.username if self.auth.user else 'unknown',
+                            current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        )
+                        
+                        # 继续循环，让LLM基于工具结果生成响应
+                        continue
+                
+                # 没有工具调用，结束循环
+                else:
+                    break
             
             # 2. AI流式输出完成后保存历史记录
             if full_content:
@@ -374,3 +462,8 @@ class AIAgent:
         except Exception as e:
             logger.error(f"流式响应错误: {str(e)}")
             yield {"type": "error", "error": str(e)}
+        
+        finally:
+            # 清理MCP适配器客户端（MultiServerMCPClient 是上下文管理器，不需要手动关闭）
+            # 注意：MultiServerMCPClient 使用 async with 上下文管理器，会自动管理连接
+            pass

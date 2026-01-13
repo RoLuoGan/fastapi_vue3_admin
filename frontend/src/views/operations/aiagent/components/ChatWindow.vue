@@ -3,7 +3,7 @@
     <!-- 消息列表 -->
     <div class="messages-container" ref="messagesRef">
       <el-empty v-if="messages.length === 0" description="暂无消息，开始对话吧">
-        <el-button type="primary" @click="$emit('new-session')">创建会话</el-button>
+        <el-button v-if="!sessionId" type="primary" @click="$emit('new-session')">创建会话</el-button>
       </el-empty>
 
       <div v-else class="messages-list">
@@ -32,10 +32,8 @@
                 生成中...
               </span>
             </div>
-            <div class="message-text">
-              <span v-html="formatContent(msg.content)"></span>
-              <span v-if="msg.isStreaming" class="typing-cursor">|</span>
-            </div>
+            <div class="message-text markdown-body" v-html="formatContent(msg.content)"></div>
+            <span v-if="msg.isStreaming" class="typing-cursor">|</span>
           </div>
         </div>
 
@@ -93,8 +91,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, computed } from 'vue'
+import { ref, watch, nextTick, computed, onMounted } from 'vue'
 import { User, Loading, Position, Service, CircleClose } from '@element-plus/icons-vue'
+import { marked } from 'marked'
 
 const props = defineProps<{
   sessionId: number | null
@@ -116,6 +115,17 @@ const emit = defineEmits<{
 
 const inputValue = ref('')
 const messagesRef = ref<HTMLElement>()
+
+// 配置 marked 选项
+onMounted(() => {
+  marked.setOptions({
+    breaks: true, // 支持回车换行
+    gfm: true, // 启用 GitHub 风格的 Markdown
+    sanitize: false, // 不进行 HTML 清理（需要信任内容）
+    smartLists: true, // 优化列表输出
+    smartypants: false // 不使用智能标点
+  })
+})
 
 // 检查是否有正在流式输出的消息
 const hasStreamingMessage = computed(() => {
@@ -156,40 +166,14 @@ const formatTime = (time: string) => {
   return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-// 格式化内容（支持基本的Markdown格式）
+// 格式化内容（使用 marked 解析 Markdown）
 const formatContent = (content: string) => {
-  let formatted = content
-  
-  // 代码块
-  formatted = formatted.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => {
-    return `<pre><code>${escapeHtml(code.trim())}</code></pre>`
-  })
-  
-  // 行内代码
-  formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>')
-  
-  // 粗体
-  formatted = formatted.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  
-  // 斜体
-  formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>')
-  
-  // 换行
-  formatted = formatted.replace(/\n/g, '<br/>')
-  
-  return formatted
-}
-
-// HTML转义
-const escapeHtml = (text: string) => {
-  const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#039;'
+  try {
+    return marked.parse(content) as string
+  } catch (error) {
+    console.error('Markdown 解析失败:', error)
+    return content // 解析失败时返回原始内容
   }
-  return text.replace(/[&<>"']/g, m => map[m])
 }
 
 // 自动滚动到底部
@@ -221,17 +205,25 @@ watch(
   flex-direction: column;
   height: 100%;
   background: #fff;
+  padding: 0 40px 40px 40px;
+  box-sizing: border-box;
 }
 
 .messages-container {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: 20px 0;
 }
 
 .messages-list {
   max-width: 900px;
   margin: 0 auto;
+}
+
+// 修改el-empty的描述文字样式
+:deep(.el-empty__description) {
+  color: #000 !important;
+  font-size: 16px !important;
 }
 
 .message-item {
@@ -282,32 +274,210 @@ watch(
   border-radius: 8px;
   line-height: 1.6;
   word-wrap: break-word;
-  white-space: pre-wrap;
+  white-space: normal;
+}
 
+// Markdown 样式
+.markdown-body {
+  // 标题样式 - 减小间距
+  :deep(h1),
+  :deep(h2),
+  :deep(h3),
+  :deep(h4),
+  :deep(h5),
+  :deep(h6) {
+    margin-top: 12px;
+    margin-bottom: 6px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+  
+  // 第一个标题不需要上边距
+  :deep(h1:first-child),
+  :deep(h2:first-child),
+  :deep(h3:first-child),
+  :deep(h4:first-child),
+  :deep(h5:first-child),
+  :deep(h6:first-child) {
+    margin-top: 0;
+  }
+
+  :deep(h1) {
+    font-size: 24px;
+    border-bottom: 1px solid #e4e7ed;
+    padding-bottom: 8px;
+  }
+
+  :deep(h2) {
+    font-size: 20px;
+    border-bottom: 1px solid #f0f0f0;
+    padding-bottom: 6px;
+  }
+
+  :deep(h3) {
+    font-size: 18px;
+  }
+
+  :deep(h4) {
+    font-size: 16px;
+  }
+
+  :deep(h5) {
+    font-size: 14px;
+  }
+
+  :deep(h6) {
+    font-size: 13px;
+  }
+
+  // 段落样式 - 移除上下边距以避免多余换行
+  :deep(p) {
+    margin: 0;
+    line-height: 1.6;
+  }
+  
+  // 段落之间的间距 - 减小间距
+  :deep(p + p) {
+    margin-top: 4px;
+  }
+
+  // 列表样式 - 减小间距
+  :deep(ul),
+  :deep(ol) {
+    margin: 6px 0;
+    padding-left: 20px;
+  }
+
+  :deep(li) {
+    margin: 2px 0;
+    line-height: 1.6;
+  }
+
+  :deep(ul li) {
+    list-style-type: disc;
+  }
+
+  :deep(ol li) {
+    list-style-type: decimal;
+  }
+
+  // 代码块样式 - 减小间距
   :deep(pre) {
     background: #282c34;
     color: #abb2bf;
     padding: 12px;
-    border-radius: 4px;
+    border-radius: 6px;
     overflow-x: auto;
+    margin: 8px 0;
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 14px;
+    line-height: 1.5;
   }
 
   :deep(code) {
-    background: rgba(0, 0, 0, 0.05);
+    background: rgba(0, 0, 0, 0.06);
     padding: 2px 6px;
-    border-radius: 3px;
-    font-family: 'Courier New', monospace;
+    border-radius: 4px;
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 0.9em;
+    color: #e83e8c;
   }
 
-  :deep(ul), :deep(ol) {
-    padding-left: 20px;
+  :deep(pre code) {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  // 引用样式 - 减小间距
+  :deep(blockquote) {
+    border-left: 4px solid #409eff;
+    margin: 8px 0;
+    padding: 6px 12px;
+    background: #f4f9ff;
+    color: #606266;
+  }
+
+  // 表格样式
+  :deep(table) {
+    border-collapse: collapse;
+    margin: 12px 0;
+    width: 100%;
+  }
+
+  :deep(th),
+  :deep(td) {
+    border: 1px solid #e4e7ed;
+    padding: 8px 12px;
+    text-align: left;
+  }
+
+  :deep(th) {
+    background: #f5f7fa;
+    font-weight: 600;
+  }
+
+  :deep(tr:nth-child(even)) {
+    background: #fafafa;
+  }
+
+  // 链接样式
+  :deep(a) {
+    color: #409eff;
+    text-decoration: none;
+    transition: color 0.2s;
+
+    &:hover {
+      color: #66b1ff;
+      text-decoration: underline;
+    }
+  }
+
+  // 图片样式
+  :deep(img) {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+    margin: 8px 0;
+  }
+
+  // 分割线样式
+  :deep(hr) {
+    border: none;
+    border-top: 1px solid #e4e7ed;
+    margin: 16px 0;
+  }
+
+  // 粗体和斜体
+  :deep(strong) {
+    font-weight: 600;
+  }
+
+  :deep(em) {
+    font-style: italic;
+  }
+
+  // 删除线
+  :deep(del) {
+    text-decoration: line-through;
+    color: #909399;
+  }
+
+  // 任务列表
+  :deep(input[type="checkbox"]) {
+    margin-right: 8px;
   }
 }
 
 .input-container {
-  border-top: 1px solid #e4e7ed;
-  padding: 16px 20px;
+  border-top:1px solid #e4e7ed;
+  padding: 16px 0;
   background: #fff;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .input-actions {

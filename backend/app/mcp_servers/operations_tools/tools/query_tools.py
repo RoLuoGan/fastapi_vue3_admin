@@ -112,7 +112,8 @@ def register_query_tools(mcp_server: Server, auth: AuthSchema):
                     auth=auth,
                     page_no=1,
                     page_size=20,
-                    search={"name": keyword}
+                    search={"name": keyword},
+                    order_by=[{"created_at": "desc"}]
                 )
                 results["servers"] = servers
             
@@ -122,7 +123,8 @@ def register_query_tools(mcp_server: Server, auth: AuthSchema):
                     auth=auth,
                     page_no=1,
                     page_size=20,
-                    search={"task_type": keyword}
+                    search={"task_type": keyword},
+                    order_by=[{"created_at": "desc"}]
                 )
                 results["tasks"] = tasks
             
@@ -141,7 +143,8 @@ def register_query_tools(mcp_server: Server, auth: AuthSchema):
                     auth=auth,
                     page_no=1,
                     page_size=1,
-                    search={}
+                    search={},
+                    order_by=[{"created_at": "desc"}]
                 )
                 stats["total_servers"] = servers.get("total", 0)
                 
@@ -150,7 +153,8 @@ def register_query_tools(mcp_server: Server, auth: AuthSchema):
                     auth=auth,
                     page_no=1,
                     page_size=1,
-                    search={"status": True}
+                    search={"status": True},
+                    order_by=[{"created_at": "desc"}]
                 )
                 stats["active_servers"] = active_servers.get("total", 0)
             
@@ -160,7 +164,8 @@ def register_query_tools(mcp_server: Server, auth: AuthSchema):
                     auth=auth,
                     page_no=1,
                     page_size=1,
-                    search={}
+                    search={},
+                    order_by=[{"created_at": "desc"}]
                 )
                 stats["total_tasks"] = tasks.get("total", 0)
             
@@ -180,7 +185,8 @@ def register_query_tools(mcp_server: Server, auth: AuthSchema):
                 auth=auth,
                 page_no=arguments.get("page", 1),
                 page_size=arguments.get("page_size", 10),
-                search=search
+                search=search,
+                order_by=[{"created_at": "desc"}]
             )
             return [TextContent(
                 type="text",

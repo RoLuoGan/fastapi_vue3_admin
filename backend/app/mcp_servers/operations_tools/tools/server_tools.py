@@ -4,6 +4,7 @@
 封装服务器节点的CRUD操作
 """
 
+import logging
 from typing import Optional, List, Dict, Any
 from mcp.server import Server
 from mcp.types import Tool, TextContent
@@ -11,6 +12,8 @@ from mcp.types import Tool, TextContent
 from app.api.v1.module_operations.server.service import ServerService
 from app.api.v1.module_operations.server.schema import ServerCreateSchema, ServerUpdateSchema
 from app.api.v1.module_system.auth.schema import AuthSchema
+
+logger = logging.getLogger(__name__)
 
 
 def register_server_tools(mcp_server: Server, auth: AuthSchema):
@@ -47,6 +50,17 @@ def register_server_tools(mcp_server: Server, auth: AuthSchema):
                             "type": "integer",
                             "description": "每页数量",
                             "default": 10
+                        },
+                        "order_by": {
+                            "type": "array",
+                            "description": "排序规则，例如：[{\"created_at\": \"desc\"}]",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string",
+                                    "enum": ["asc", "desc"]
+                                }
+                            }
                         }
                     }
                 }
@@ -156,74 +170,114 @@ def register_server_tools(mcp_server: Server, auth: AuthSchema):
     async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         """调用服务器管理工具"""
         
-        if name == "list_servers":
-            # 构建搜索条件
-            search = {}
-            if "project" in arguments:
-                search["project"] = arguments["project"]
-            if "status" in arguments:
-                search["status"] = arguments["status"]
-            if "ip" in arguments:
-                search["ip"] = arguments["ip"]
+        # 记录工具调用
+        logger.info(f"[MCP工具调用] 工具名称: {name}, 参数: {arguments}")
+        
+        try:
+            if name == "list_servers":
+                # 构建搜索条件
+                search = {}
+                if "project" in arguments:
+                    search["project"] = arguments["project"]
+                if "status" in arguments:
+                    search["status"] = arguments["status"]
+                if "ip" in arguments:
+                    search["ip"] = arguments["ip"]
+                
+                # 获取排序参数
+                order_by = arguments.get("order_by", [{"created_at": "desc"}])
+                
+                logger.info(f"[MCP工具调用] list_servers - 搜索条件: {search}, 排序: {order_by}")
+                
+                result = await ServerService.get_server_page_service(
+                    auth=auth,
+                    page_no=arguments.get("page", 1),
+                    page_size=arguments.get("page_size", 10),
+                    search=search,
+                    order_by=order_by
+                )
+                
+                logger.info(f"[MCP工具返回] list_servers - 总数: {result.get('total', 0)}, 数据: {result}")
+                
+                return [TextContent(
+                    type="text",
+                    text=f"查询成功，共找到 {result.get('total', 0)} 个节点：\n{result}"
+                )]
             
-            result = await ServerService.get_server_page_service(
-                auth=auth,
-                page_no=arguments.get("page", 1),
-                page_size=arguments.get("page_size", 10),
-                search=search
-            )
+            elif name == "get_server":
+                logger.info(f"[MCP工具调用] get_server - 节点ID: {arguments['id']}")
+                
+                result = await ServerService.get_server_detail_service(
+                    auth=auth,
+                    id=arguments["id"]
+                )
+                
+                logger.info(f"[MCP工具返回] get_server - 结果: {result}")
+                
+                return [TextContent(
+                    type="text",
+                    text=f"节点详情：\n{result}"
+                )]
             
-            return [TextContent(
-                type="text",
-                text=f"查询成功，共找到 {result.get('total', 0)} 个节点：\n{result}"
-            )]
+            elif name == "create_server":
+                logger.info(f"[MCP工具调用] create_server - 参数: {arguments}")
+                
+                schema = ServerCreateSchema(**arguments)
+                result = await ServerService.create_server_service(
+                    auth=auth,
+                    data=schema
+                )
+                
+                logger.info(f"[MCP工具返回] create_server - 节点ID: {result.get('id')}, 结果: {result}")
+                
+                return [TextContent(
+                    type="text",
+                    text=f"创建成功，节点ID: {result.get('id')}\n{result}"
+                )]
+            
+            elif name == "update_server":
+                node_id = arguments.pop("id")
+                logger.info(f"[MCP工具调用] update_server - 节点ID: {node_id}, 参数: {arguments}")
+                
+                schema = ServerUpdateSchema(**arguments)
+                result = await ServerService.update_server_service(
+                    auth=auth,
+                    id=node_id,
+                    data=schema
+                )
+                
+                logger.info(f"[MCP工具返回] update_server - 结果: {result}")
+                
+                return [TextContent(
+                    type="text",
+                    text=f"更新成功\n{result}"
+                )]
+            
+            elif name == "delete_servers":
+                logger.info(f"[MCP工具调用] delete_servers - 节点IDs: {arguments['ids']}")
+                
+                result = await ServerService.batch_delete_server_service(
+                    auth=auth,
+                    ids=arguments["ids"]
+                )
+                
+                logger.info(f"[MCP工具返回] delete_servers - 结果: {result}")
+                
+                return [TextContent(
+                    type="text",
+                    text=f"删除操作完成\n{result}"
+                )]
+            
+            else:
+                logger.warning(f"[MCP工具调用] 未知工具: {name}")
+                return [TextContent(
+                    type="text",
+                    text=f"未知工具: {name}"
+                )]
         
-        elif name == "get_server":
-            result = await ServerService.get_server_detail_service(
-                auth=auth,
-                id=arguments["id"]
-            )
+        except Exception as e:
+            logger.error(f"[MCP工具错误] 工具名称: {name}, 错误: {str(e)}", exc_info=True)
             return [TextContent(
                 type="text",
-                text=f"节点详情：\n{result}"
-            )]
-        
-        elif name == "create_server":
-            schema = ServerCreateSchema(**arguments)
-            result = await ServerService.create_server_service(
-                auth=auth,
-                data=schema
-            )
-            return [TextContent(
-                type="text",
-                text=f"创建成功，节点ID: {result.get('id')}\n{result}"
-            )]
-        
-        elif name == "update_server":
-            node_id = arguments.pop("id")
-            schema = ServerUpdateSchema(**arguments)
-            result = await ServerService.update_server_service(
-                auth=auth,
-                id=node_id,
-                data=schema
-            )
-            return [TextContent(
-                type="text",
-                text=f"更新成功\n{result}"
-            )]
-        
-        elif name == "delete_servers":
-            result = await ServerService.batch_delete_server_service(
-                auth=auth,
-                ids=arguments["ids"]
-            )
-            return [TextContent(
-                type="text",
-                text=f"删除操作完成\n{result}"
-            )]
-        
-        else:
-            return [TextContent(
-                type="text",
-                text=f"未知工具: {name}"
+                text=f"工具调用失败: {str(e)}"
             )]
