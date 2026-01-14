@@ -28,9 +28,7 @@ from app.api.v1.module_system.auth.schema import AuthSchema
 from app.api.v1.module_system.user.crud import UserCRUD
 
 from .config import mcp_config
-from .tools.server_tools import register_server_tools
-from .tools.task_tools import register_task_tools
-from .tools.query_tools import register_query_tools
+from .tools import register_all_tools
 
 
 class OperationsMCPServer:
@@ -104,17 +102,11 @@ class OperationsMCPServer:
         # 初始化认证
         await self._init_auth()
         
-        # 注册所有工具
+        # 统一注册所有工具
         logger.info("开始注册MCP工具...")
         
-        register_server_tools(self.mcp_server, self.auth)
-        logger.info("✓ 服务器管理工具已注册")
-        
-        register_task_tools(self.mcp_server, self.auth)
-        logger.info("✓ 任务管理工具已注册")
-        
-        register_query_tools(self.mcp_server, self.auth)
-        logger.info("✓ 查询统计工具已注册")
+        register_all_tools(self.mcp_server, self.auth)
+        logger.info("✓ 所有MCP工具已注册（服务器管理、任务管理、查询统计）")
         
         logger.info(f"MCP服务器 '{mcp_config.server_name}' 初始化完成")
     

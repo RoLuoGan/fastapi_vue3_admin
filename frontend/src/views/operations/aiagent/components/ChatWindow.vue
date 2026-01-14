@@ -35,14 +35,12 @@
             <div class="message-text markdown-body" v-html="formatContent(msg.content)"></div>
             <span v-if="msg.isStreaming" class="typing-cursor">|</span>
             
-            <!-- MCP工具调用卡片 -->
-            <div v-if="msg.toolCalls && msg.toolCalls.length > 0" class="tool-calls-container">
-              <McpToolCallCard
-                v-for="(toolCall, toolIndex) in msg.toolCalls"
-                :key="toolIndex"
-                :tool-call="toolCall"
-              />
-            </div>
+            <!-- MCP工具调用汇总卡片 -->
+            <ToolCallsSummary
+              v-if="msg.toolCalls && msg.toolCalls.length > 0"
+              :tool-calls="msg.toolCalls"
+              :is-streaming="msg.isStreaming"
+            />
           </div>
         </div>
 
@@ -103,7 +101,7 @@
 import { ref, watch, nextTick, computed, onMounted } from 'vue'
 import { User, Loading, Position, Service, CircleClose } from '@element-plus/icons-vue'
 import { marked } from 'marked'
-import McpToolCallCard from './McpToolCallCard.vue'
+import ToolCallsSummary from './ToolCallsSummary.vue'
 import type { McpToolCall } from '@/api/operations/aiagent'
 
 const props = defineProps<{
@@ -287,13 +285,6 @@ watch(
   line-height: 1.6;
   word-wrap: break-word;
   white-space: normal;
-}
-
-.tool-calls-container {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 // Markdown 样式

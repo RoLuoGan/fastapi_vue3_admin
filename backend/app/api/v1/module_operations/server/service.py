@@ -4,6 +4,7 @@
 """
 
 from typing import Dict, List, Optional
+from sqlalchemy import select
 
 from app.core.exceptions import CustomException
 from app.api.v1.module_system.auth.schema import AuthSchema
@@ -186,11 +187,19 @@ class ServerService:
     async def delete_server_service(cls, auth: AuthSchema, ids: List[int]) -> None:
         if len(ids) < 1:
             raise CustomException(msg="删除失败，删除对象不能为空")
-        for node_id in ids:
-            node = await ServerCRUD(auth).get_by_id_crud(id=node_id)
-            if not node:
-                raise CustomException(msg="删除失败，该节点不存在")
-        await ServerCRUD(auth).delete(ids=ids)
+        
+        # 批量检查节点是否存在（减少数据库查询次数）
+        stmt = select(ServerCRUD(auth).model.id).where(ServerCRUD(auth).model.id.in_(ids))
+        result = await auth.db.execute(stmt)
+        existing_ids = set(row[0] for row in result.fetchall())
+        
+        # 检查是否有不存在的节点
+        missing_ids = set(ids) - existing_ids
+        if missing_ids:
+            raise CustomException(msg=f"删除失败，以下节点不存在: {', '.join(map(str, missing_ids))}")
+        
+        # 直接执行删除（利用数据库的 CASCADE 自动清理关联数据）
+        await ServerCRUD(auth).delete(ids=list(existing_ids))
 
     @classmethod
     async def get_server_page_service(

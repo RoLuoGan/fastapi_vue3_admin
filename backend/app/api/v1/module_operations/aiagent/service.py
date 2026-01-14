@@ -286,7 +286,8 @@ class AIAgentService:
                     "id": msg.id,
                     "role": msg.role,
                     "content": msg.content,
-                    "created_at": msg.created_at.isoformat()
+                    "created_at": msg.created_at.isoformat(),
+                    "tool_calls": msg.tool_calls
                 }
                 for msg in messages
             ],

@@ -80,10 +80,10 @@ class NginxUpstreamService:
             logger.warning(f"[NginxUpstream] upstream名称已存在: {data.upstream}, exist_id={exist.id}")
             raise CustomException(msg=f"创建失败，upstream名称 '{data.upstream}' 已存在")
 
-        # 检查nginx节点是否存在
+        # 检查nginx节点是否存在（不预加载services，避免持有锁）
         node_ids = list(set(data.nginx_node_ids))
         logger.debug(f"[NginxUpstream] 检查nginx节点: {node_ids}")
-        nodes = await ServerCRUD(auth).get_list_crud(search={"id": ("in", node_ids)}, preload=["services"])
+        nodes = await ServerCRUD(auth).get_list_crud(search={"id": ("in", node_ids)})
         logger.debug(f"[NginxUpstream] 找到的节点数量: {len(nodes)}, 期望数量: {len(node_ids)}")
         
         if len(nodes) != len(node_ids):

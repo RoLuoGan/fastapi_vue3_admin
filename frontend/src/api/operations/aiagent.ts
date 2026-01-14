@@ -292,6 +292,7 @@ export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
   created_at: string;
+  tool_calls?: McpToolCall[];
 }
 
 /** 聊天请求 */

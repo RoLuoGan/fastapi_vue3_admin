@@ -4,6 +4,7 @@
       <template #header>
         <div class="tool-card-header">
           <div class="tool-header-left">
+            <div class="step-number">{{ step }}</div>
             <el-icon class="tool-icon" :class="{ 'success': toolCall.success, 'error': !toolCall.success }">
               <Tools v-if="toolCall.success" />
               <Warning v-else />
@@ -17,38 +18,49 @@
 
       <div class="tool-card-body">
         <!-- 输入参数 -->
-        <div class="tool-section">
-          <div class="section-title">
-            <el-icon><DocumentCopy /></el-icon>
-            <span>输入参数</span>
-          </div>
-          <div class="section-content">
-            <pre class="json-content">{{ formatJson(toolCall.input) }}</pre>
-          </div>
-        </div>
+        <el-collapse v-model="activeSections" class="tool-collapse">
+          <el-collapse-item name="input">
+            <template #title>
+              <div class="collapse-title">
+                <el-icon><DocumentCopy /></el-icon>
+                <span>输入参数</span>
+              </div>
+            </template>
+            <div class="section-content">
+              <pre class="json-content">{{ formatJson(toolCall.input) }}</pre>
+            </div>
+          </el-collapse-item>
 
-        <!-- 输出结果 -->
-        <div class="tool-section">
-          <div class="section-title">
-            <el-icon><CircleCheck /></el-icon>
-            <span>执行结果</span>
-          </div>
-          <div class="section-content">
-            <div class="output-content" v-html="formatOutput(toolCall.output)"></div>
-          </div>
-        </div>
+          <!-- 输出结果 -->
+          <el-collapse-item name="output">
+            <template #title>
+              <div class="collapse-title">
+                <el-icon><CircleCheck /></el-icon>
+                <span>执行结果</span>
+              </div>
+            </template>
+            <div class="section-content">
+              <div class="output-content" v-html="formatOutput(toolCall.output)"></div>
+            </div>
+          </el-collapse-item>
+        </el-collapse>
       </div>
     </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { Tools, Warning, DocumentCopy, CircleCheck } from '@element-plus/icons-vue'
 import type { McpToolCall } from '@/api/operations/aiagent'
 
 defineProps<{
   toolCall: McpToolCall
+  step: number
 }>()
+
+// 控制折叠面板的展开状态，默认为空数组表示全部折叠
+const activeSections = ref<string[]>([])
 
 // 格式化JSON
 const formatJson = (obj: any): string => {
@@ -104,6 +116,20 @@ const formatOutput = (output: string): string => {
     flex: 1;
   }
 
+  .step-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: #409eff;
+    color: #fff;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
   .tool-icon {
     font-size: 18px;
 
@@ -126,26 +152,47 @@ const formatOutput = (output: string): string => {
   .tool-card-body {
     display: flex;
     flex-direction: column;
-    gap: 16px;
   }
 
-  .tool-section {
-    background: #fff;
-    border-radius: 6px;
-    padding: 12px;
-    border: 1px solid #e4e7ed;
+  .tool-collapse {
+    border: none;
+    background: transparent;
+
+    :deep(.el-collapse-item__header) {
+      height: auto;
+      line-height: normal;
+      padding: 8px 0;
+      border: none;
+      background: #fff;
+      border-radius: 6px;
+      margin-bottom: 8px;
+
+      &:hover {
+        background: #f5f7fa;
+      }
+    }
+
+    :deep(.el-collapse-item__wrap) {
+      border: none;
+      background: #fff;
+      border-radius: 6px;
+      padding: 12px;
+      border: 1px solid #e4e7ed;
+      margin-bottom: 8px;
+    }
+
+    :deep(.el-collapse-item__content) {
+      padding: 0;
+    }
   }
 
-  .section-title {
+  .collapse-title {
     display: flex;
     align-items: center;
     gap: 6px;
     font-size: 13px;
     font-weight: 600;
     color: #606266;
-    margin-bottom: 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #f0f0f0;
 
     .el-icon {
       font-size: 16px;
@@ -192,4 +239,3 @@ const formatOutput = (output: string): string => {
   }
 }
 </style>
-

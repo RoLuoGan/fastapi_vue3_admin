@@ -471,10 +471,42 @@ class AIAgent:
             
             # 2. AI流式输出完成后保存历史记录
             if full_content:
+                # 收集所有工具调用信息用于保存到历史记录
+                collected_tool_calls = []
+                # 从 chat_history 中收集所有工具调用和结果
+                for msg in chat_history:
+                    if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+                        # 这是一个包含工具调用的AI消息
+                        for tool_call in msg.tool_calls:
+                            if isinstance(tool_call, dict):
+                                tool_name = tool_call.get('name') or tool_call.get('function', {}).get('name', '')
+                                tool_args = tool_call.get('args') or tool_call.get('function', {}).get('arguments', {})
+                                tool_call_id = tool_call.get('id') or tool_call.get('function', {}).get('id', '')
+                            else:
+                                tool_name = getattr(tool_call, 'name', '') or getattr(tool_call, 'function', {}).get('name', '')
+                                tool_args = getattr(tool_call, 'args', {}) or getattr(tool_call, 'function', {}).get('arguments', {})
+                                tool_call_id = getattr(tool_call, 'id', '') or getattr(tool_call, 'function', {}).get('id', '')
+                            
+                            # 从chat_history中查找对应的工具结果
+                            tool_output = ''
+                            for result_msg in chat_history:
+                                if isinstance(result_msg, ToolMessage) and result_msg.tool_call_id == tool_call_id:
+                                    tool_output = result_msg.content
+                                    break
+                            
+                            collected_tool_calls.append({
+                                'tool': tool_name,
+                                'tool_call_id': tool_call_id,
+                                'input': tool_args,
+                                'output': tool_output,
+                                'success': not (str(tool_output).startswith('❌') or str(tool_output).startswith('⚠️'))
+                            })
+                
                 assistant_msg = await self.crud.create_message(
                     session_id=self.session_id,
                     role=MessageRole.ASSISTANT,
-                    content=full_content
+                    content=full_content,
+                    tool_calls=collected_tool_calls if collected_tool_calls else None
                 )
                 assistant_msg_id = assistant_msg.id
             

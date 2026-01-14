@@ -4,6 +4,7 @@
 """
 
 from typing import List, Dict, Optional
+from sqlalchemy import select, func
 
 from app.core.exceptions import CustomException
 from app.api.v1.module_system.auth.schema import AuthSchema
@@ -12,6 +13,7 @@ from .crud import ServiceCRUD
 from .schema import ServiceCreateSchema, ServiceUpdateSchema, ServiceOutSchema
 from ..server.schema import ServerOutSchema
 from ..server.crud import ServerCRUD
+from ..models import node_service_association
 
 
 class ServiceService:
@@ -132,11 +134,30 @@ class ServiceService:
     async def delete_service_service(cls, auth: AuthSchema, ids: List[int]) -> None:
         if len(ids) < 1:
             raise CustomException(msg="删除失败，删除对象不能为空")
+        
+        # 批量检查服务模块是否存在（减少数据库查询次数）
+        stmt = select(ServiceCRUD(auth).model.id, ServiceCRUD(auth).model.name).where(
+            ServiceCRUD(auth).model.id.in_(ids)
+        )
+        result = await auth.db.execute(stmt)
+        services = {row[0]: row[1] for row in result.fetchall()}
+        
+        # 检查是否有不存在的服务模块
+        missing_ids = set(ids) - set(services.keys())
+        if missing_ids:
+            raise CustomException(msg=f"删除失败，以下服务模块不存在: {', '.join(map(str, missing_ids))}")
+        
+        # 检查每个服务模块是否有关联的节点（使用 COUNT 查询，避免预加载）
         for service_id in ids:
-            service = await ServiceCRUD(auth).get_by_id_crud(id=service_id, preload=["nodes"])
-            if not service:
-                raise CustomException(msg="删除失败，该服务模块不存在")
-            if service.nodes and len(service.nodes) > 0:
-                raise CustomException(msg=f'删除失败，服务模块"{service.name}"下存在节点，请先删除节点')
-        await ServiceCRUD(auth).delete(ids=ids)
+            count_stmt = select(func.count()).select_from(
+                node_service_association
+            ).where(node_service_association.c.service_id == service_id)
+            count_result = await auth.db.execute(count_stmt)
+            node_count = count_result.scalar() or 0
+            
+            if node_count > 0:
+                raise CustomException(msg=f'删除失败，服务模块"{services[service_id]}"下存在节点，请先删除节点')
+        
+        # 直接执行删除（利用数据库的 CASCADE 自动清理关联数据）
+        await ServiceCRUD(auth).delete(ids=list(services.keys()))
 

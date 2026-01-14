@@ -78,7 +78,11 @@ export function useChat() {
       
       if (res.data.code === 0) {
         currentSessionId.value = sessionId
-        messages.value = res.data.data.messages || []
+        // 将后端的 tool_calls 映射为前端的 toolCalls
+        messages.value = (res.data.data.messages || []).map((msg: any) => ({
+          ...msg,
+          toolCalls: msg.tool_calls || undefined
+        }))
         console.log('[useChat] 历史加载成功, 消息数量:', messages.value.length)
         console.log('[useChat] 消息列表:', messages.value)
         return res.data.data
