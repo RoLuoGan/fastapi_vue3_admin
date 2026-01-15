@@ -20,7 +20,7 @@ from .schema import (
     SessionCreateSchema,
     ChatRequest,
     ChatResponse,
-    OperationConfirmRequest,
+    ToolConfirmRequest,
     TakeoverRequest
 )
 from .models import SessionStatus, MessageRole
@@ -116,7 +116,8 @@ class AIAgentService:
     async def chat_stream(
         cls,
         auth: AuthSchema,
-        request: ChatRequest
+        request: ChatRequest,
+        redis_client = None
     ) -> AsyncGenerator[str, None]:
         """
         处理聊天请求（流式）
@@ -139,12 +140,13 @@ class AIAgentService:
         if session.status != SessionStatus.ACTIVE.value:
             yield f"data: {{'type':'error','error':'会话状态不正确'}}\n\n"
             return
-        
+
         # 创建AI Agent（不传递MCP客户端，让Agent内部使用MultiServerMCPClient）
         agent = AIAgent(
             auth=auth,
             session_id=request.session_id,
-            llm_model=session.llm_model
+            llm_model=session.llm_model,
+            redis_client=redis_client
         )
         
         # 流式处理
@@ -152,49 +154,6 @@ class AIAgentService:
             import json
             yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
     
-    @classmethod
-    async def confirm_operation(
-        cls,
-        auth: AuthSchema,
-        request: OperationConfirmRequest
-    ) -> Dict[str, Any]:
-        """
-        确认或拒绝待确认的操作
-        
-        Args:
-            auth: 认证信息
-            request: 确认请求
-            
-        Returns:
-            操作执行结果
-        """
-        crud = AIAgentCRUD(auth)
-        
-        # 获取操作日志
-        operation_log = await crud.get_operation_log(request.operation_id)
-        if not operation_log:
-            raise CustomException(msg="操作不存在")
-        
-        # 检查权限（只能确认自己发起的操作）
-        session = await crud.get_session(operation_log.session_id)
-        if session.user_id != auth.user.id:
-            raise CustomException(msg="无权确认该操作")
-        
-        # 创建确认处理器（不传递 MCP 客户端，使用 MultiServerMCPClient）
-        confirm_handler = ConfirmHandler(auth)
-        
-        # 执行确认
-        result = await confirm_handler.confirm_operation(
-            operation_id=request.operation_id,
-            confirmed=request.confirmed,
-            comment=request.comment
-        )
-        
-        return {
-            "operation_id": request.operation_id,
-            "status": "success" if result.get("success") else "failed",
-            "result": result
-        }
     
     @classmethod
     async def takeover_session(
@@ -374,36 +333,76 @@ class AIAgentService:
             "message": "会话已结束"
         }
     
+
     @classmethod
-    async def get_pending_operations(
+    async def confirm_tool_call(
         cls,
         auth: AuthSchema,
-        session_id: Optional[int] = None
-    ) -> List[Dict[str, Any]]:
+        operation_id: int,
+        request: ToolConfirmRequest
+    ) -> Dict[str, Any]:
         """
-        获取待确认的操作列表
-        
+        确认或拒绝MCP工具调用
+
         Args:
             auth: 认证信息
-            session_id: 会话ID（可选）
-            
+            operation_id: 操作ID
+            request: 确认请求
+
         Returns:
-            待确认操作列表
+            执行结果
         """
+        logger.info(f"[confirm_tool_call] 开始处理确认请求: operation_id={operation_id}, confirmed={request.confirmed}, user_id={auth.user.id}")
+
         crud = AIAgentCRUD(auth)
-        
-        operations = await crud.get_pending_operations(session_id)
-        
-        return [
-            {
-                "operation_id": op.id,
-                "session_id": op.session_id,
-                "operation_type": op.operation_type,
-                "tool_name": op.tool_name,
-                "target_resource": op.target_resource,
-                "params": op.params,
-                "confirm_reason": op.confirm_reason,
-                "created_at": op.created_at.isoformat()
-            }
-            for op in operations
-        ]
+
+        # 获取操作日志
+        operation_log = await crud.get_operation_log(operation_id)
+        if not operation_log:
+            raise CustomException(msg="操作不存在或已过期")
+
+        # 检查权限（只能确认自己会话的操作）
+        session = await crud.get_session(operation_log.session_id)
+        if session.user_id != auth.user.id:
+            raise CustomException(msg="无权确认该操作")
+
+        # 检查操作状态
+        if operation_log.status != "pending":
+            if operation_log.status == "confirmed":
+                return {
+                    "operation_id": operation_id,
+                    "success": True,
+                    "result": "操作已被确认并执行",
+                    "confirmed": True
+                }
+            elif operation_log.status == "rejected":
+                return {
+                    "operation_id": operation_id,
+                    "success": False,
+                    "result": "操作已被拒绝",
+                    "confirmed": False
+                }
+            else:
+                return {
+                    "operation_id": operation_id,
+                    "success": False,
+                    "result": f"操作状态异常: {operation_log.status}",
+                    "confirmed": False
+                }
+
+        # 创建AI Agent来执行确认
+        agent = AIAgent(
+            auth=auth,
+            session_id=operation_log.session_id,
+            llm_model=session.llm_model
+        )
+
+        # 执行确认
+        result = await agent.confirm_and_execute_tool(operation_id, request.confirmed)
+
+        return {
+            "operation_id": operation_id,
+            "success": "❌" not in result and "失败" not in result,
+            "result": result,
+            "confirmed": request.confirmed
+        }

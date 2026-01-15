@@ -8,7 +8,7 @@ AI Agent 核心逻辑
 import json
 import logging
 import asyncio
-from typing import Dict, Any, List, Optional, AsyncGenerator
+from typing import Dict, Any, List, Optional, AsyncGenerator, Callable
 from datetime import datetime
 
 from langchain_openai import ChatOpenAI
@@ -21,12 +21,158 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from app.config.setting import settings
 from app.api.v1.module_system.auth.schema import AuthSchema
 
-from .rule_engine import RuleEngine
 from .crud import AIAgentCRUD
 from .models import SessionStatus, MessageRole, OperationStatus
 from .prompts import OPERATIONS_ASSISTANT_PROMPT
 
 logger = logging.getLogger(__name__)
+
+
+class ToolConfirmationRedisState:
+    """工具确认Redis状态机管理"""
+
+    def __init__(self, redis_client):
+        self.redis = redis_client
+        self.key_prefix = "aiagent:tool_confirmation"
+
+    def _get_key(self, operation_id: int) -> str:
+        """获取Redis键"""
+        return f"{self.key_prefix}:{operation_id}"
+
+    async def set_pending(self, operation_id: int, data: Dict[str, Any], timeout: int = 1800) -> bool:
+        """设置待确认状态
+
+        Args:
+            operation_id: 操作ID
+            data: 状态数据
+            timeout: 超时时间(秒)
+
+        Returns:
+            是否设置成功
+        """
+        try:
+            key = self._get_key(operation_id)
+            state_data = {
+                "status": "pending",
+                "data": data,
+                "created_at": datetime.now().isoformat(),
+                "timeout": timeout
+            }
+
+            success = await self.redis.set(
+                key,
+                json.dumps(state_data, ensure_ascii=False),
+                ex=timeout
+            )
+            return success
+        except Exception as e:
+            logger.error(f"[RedisState] 设置工具确认状态失败: operation_id={operation_id}, error={str(e)}")
+            return False
+
+    async def wait_for_confirmation(self, operation_id: int, timeout: int = 1800) -> Dict[str, Any]:
+        """等待确认结果
+
+        Args:
+            operation_id: 操作ID
+            timeout: 等待超时时间(秒)，默认30分钟
+
+        Returns:
+            确认结果数据
+        """
+        key = self._get_key(operation_id)
+
+        # 使用Redis的阻塞等待机制
+        start_time = asyncio.get_event_loop().time()
+        poll_interval = 1  # 每秒检查一次
+        check_count = 0
+
+        while True:
+            check_count += 1
+            try:
+                # 检查状态
+                state_data = await self.redis.get(key)
+                if not state_data:
+                    # 状态已过期或不存在，抛出超时异常
+                    raise asyncio.TimeoutError("确认状态已过期，请重新发起请求")
+
+                state = json.loads(state_data)
+
+                if state["status"] == "confirmed":
+                    # 已确认，清理状态
+                    await self.redis.delete(key)
+                    return state["result"]
+
+                elif state["status"] == "rejected":
+                    # 已拒绝，清理状态
+                    await self.redis.delete(key)
+                    return state["result"]
+
+                # 继续等待
+                await asyncio.sleep(poll_interval)
+
+                # 检查超时
+                elapsed = asyncio.get_event_loop().time() - start_time
+                if elapsed > timeout:
+                    raise asyncio.TimeoutError(f"确认超时（{timeout}秒）")
+
+            except json.JSONDecodeError:
+                await asyncio.sleep(poll_interval)
+            except Exception:
+                raise
+
+    async def set_result(self, operation_id: int, confirmed: bool, result: Dict[str, Any]) -> bool:
+        """设置确认结果
+
+        Args:
+            operation_id: 操作ID
+            confirmed: 是否确认
+            result: 结果数据
+
+        Returns:
+            是否设置成功
+        """
+        try:
+            key = self._get_key(operation_id)
+
+            # 获取当前状态
+            state_data = await self.redis.get(key)
+            if not state_data:
+                return False
+
+            state = json.loads(state_data)
+
+            # 更新状态
+            state["status"] = "confirmed" if confirmed else "rejected"
+            state["result"] = result
+            state["updated_at"] = datetime.now().isoformat()
+
+            # 保存更新后的状态
+            success = await self.redis.set(
+                key,
+                json.dumps(state, ensure_ascii=False),
+                ex=60  # 结果保留1分钟
+            )
+
+            return success
+
+        except Exception as e:
+            return False
+
+    async def cleanup(self, operation_id: int) -> bool:
+        """清理状态
+
+        Args:
+            operation_id: 操作ID
+
+        Returns:
+            是否清理成功
+        """
+        try:
+            key = self._get_key(operation_id)
+            await self.redis.delete(key)
+            return True
+        except Exception as e:
+            return False
 
 
 class AIAgent:
@@ -36,7 +182,8 @@ class AIAgent:
         self,
         auth: AuthSchema,
         session_id: int,
-        llm_model: str = "deepseek"
+        llm_model: str = "deepseek",
+        redis_client = None
     ):
         """
         初始化AI Agent
@@ -51,7 +198,6 @@ class AIAgent:
         self.llm_model = llm_model
         
         self.crud = AIAgentCRUD(auth)
-        self.rule_engine = RuleEngine(auth)
         
         # 初始化LLM
         self.llm = self._init_llm()
@@ -68,6 +214,9 @@ class AIAgent:
         
         # 初始化Agent
         self._init_agent()
+
+        # Redis状态机管理
+        self.redis_state_manager = ToolConfirmationRedisState(redis_client) if redis_client else None
     
     def _init_llm(self) -> ChatOpenAI:
         """初始化LLM"""
@@ -138,14 +287,15 @@ class AIAgent:
         # 初始化工具（异步加载MCP工具）
         asyncio.create_task(self._init_tools())
     
-    async def _call_mcp_tool(self, tool_name: str, arguments: Any) -> str:
+    async def _call_mcp_tool(self, tool_name: str, arguments: Any, require_confirm: bool = False) -> str:
         """
         调用MCP工具（使用 MultiServerMCPClient）
-        
+
         Args:
             tool_name: 工具名称
             arguments: 工具参数
-            
+            require_confirm: 是否需要确认（操作类工具需要，查询类工具不需要）
+
         Returns:
             工具执行结果
         """
@@ -155,38 +305,50 @@ class AIAgent:
                 arguments = json.loads(arguments)
             except:
                 arguments = {"input": arguments}
-        
-        logger.info(f"准备调用MCP工具: {tool_name}, 参数: {arguments}")
-        
+
+        logger.info(f"准备调用MCP工具: {tool_name}, 参数: {arguments}, 需要确认: {require_confirm}")
+
         # 🔒 安全验证：检查工具是否存在
         if tool_name not in self.available_tool_names:
-            logger.warning(f"尝试调用不存在的工具: {tool_name}, 可用工具: {self.available_tool_names}")
-            return f"❌ 错误：工具 '{tool_name}' 不存在。当前可用工具：{', '.join(sorted(self.available_tool_names))}"
-        
-        # 规则检查：是否需要确认
-        need_confirm, reason = await self.rule_engine.check_operation(
-            operation_type=tool_name,
-            params=arguments,
-            user=self.auth.user
-        )
-        
-        # 记录操作日志
+            available_tools_str = ', '.join(sorted(self.available_tool_names)) if self.available_tool_names else "无可用工具"
+            logger.warning(f"尝试调用不存在的工具: {tool_name}, 可用工具: {available_tools_str}")
+
+            if not self.available_tool_names:
+                return "❌ 错误：当前系统没有配置任何运维工具，无法执行查询操作。请联系管理员配置MCP服务器。"
+            else:
+                return f"❌ 错误：工具 '{tool_name}' 不存在。当前可用工具：{available_tools_str}"
+
+        # 创建操作日志
         operation_log = await self.crud.create_operation_log(
             session_id=self.session_id,
             operation_type=tool_name,
             tool_name=tool_name,
             target_resource=str(arguments.get("id", arguments.get("ids", ""))),
             params=arguments,
-            need_confirm=need_confirm,
-            confirm_reason=reason,
-            status=OperationStatus.PENDING if need_confirm else OperationStatus.CONFIRMED
+            need_confirm=require_confirm,
+            confirm_reason="系统自动确认流程" if require_confirm else "查询类工具直接执行",
+            status=OperationStatus.PENDING if require_confirm else OperationStatus.CONFIRMED
         )
-        
-        # 如果需要确认，返回等待确认的消息
-        if need_confirm:
-            return f"⚠️ 该操作需要确认：{reason}\n操作ID: {operation_log.id}\n请在前端确认后继续。"
-        
-        # 调用MCP工具（使用 MultiServerMCPClient）
+
+        # 如果需要确认，返回等待确认的消息（用于操作类工具）
+        if require_confirm:
+            return f"⚠️ 该操作需要确认：即将执行 {tool_name}\n操作ID: {operation_log.id}\n请在前端确认后继续。"
+
+        # 查询类工具直接执行
+        return await self._execute_mcp_tool(operation_log, tool_name, arguments)
+
+    async def _execute_mcp_tool(self, operation_log, tool_name: str, arguments: Any) -> str:
+        """
+        实际执行MCP工具
+
+        Args:
+            operation_log: 操作日志对象
+            tool_name: 工具名称
+            arguments: 工具参数
+
+        Returns:
+            工具执行结果
+        """
         try:
             # 从工具列表中查找对应的工具
             tool = None
@@ -194,41 +356,87 @@ class AIAgent:
                 if t.name == tool_name:
                     tool = t
                     break
-            
+
             if not tool:
                 raise ValueError(f"工具不存在: {tool_name}")
-            
+
             # 调用工具
             tool_result = await tool.ainvoke(arguments)
-            
-            # 更新操作日志
+
+            # 更新操作日志为成功
             await self.crud.update_operation_log(
                 operation_log.id,
                 status=OperationStatus.SUCCESS,
                 result={"success": True, "result": tool_result},
                 executed_at=datetime.now()
             )
-            
+
             return str(tool_result)
-            
+
         except Exception as e:
             logger.error(f"调用MCP工具失败: {str(e)}")
-            
-            # 更新操作日志
+
+            # 更新操作日志为失败
             await self.crud.update_operation_log(
                 operation_log.id,
                 status=OperationStatus.FAILED,
                 error_message=str(e),
                 executed_at=datetime.now()
             )
-            
+
             return f"操作失败: {str(e)}"
-    
-    def _call_mcp_tool_sync(self, tool_name: str, arguments: Any) -> str:
+
+    async def confirm_and_execute_tool(self, operation_id: int, confirmed: bool) -> str:
+        """
+        确认并执行工具调用
+
+        Args:
+            operation_id: 操作ID
+            confirmed: 是否确认执行
+
+        Returns:
+            执行结果
+        """
+        # 获取操作日志
+        operation_log = await self.crud.get_operation_log(operation_id)
+        if not operation_log:
+            return "❌ 操作不存在或已过期"
+
+        if operation_log.status != OperationStatus.PENDING:
+            if operation_log.status == OperationStatus.CONFIRMED:
+                return "✅ 操作已被确认并执行"
+            elif operation_log.status == OperationStatus.REJECTED:
+                return "❌ 操作已被拒绝"
+            else:
+                return f"❌ 操作状态异常: {operation_log.status}"
+
+        # 尝试通知等待的agent确认结果（通过Redis状态机）
+        if self.redis_state_manager:
+            try:
+                await self.redis_state_manager.set_result(operation_id, confirmed, {
+                    "confirmed": confirmed,
+                    "operation_log": operation_log
+                })
+            except Exception as e:
+                logger.warning(f"设置Redis确认结果失败，可能已过期: {str(e)}")
+
+        if not confirmed:
+            # 用户拒绝，更新状态为拒绝
+            await self.crud.update_operation_log(
+                operation_id,
+                status=OperationStatus.REJECTED,
+                executed_at=datetime.now()
+            )
+            return "❌ 用户已拒绝执行该操作"
+
+        # 执行工具
+        return await self._execute_mcp_tool(operation_log, operation_log.tool_name, operation_log.params)
+
+    def _call_mcp_tool_sync(self, tool_name: str, arguments: Any, require_confirm: bool = False) -> str:
         """同步版本的工具调用（用于兼容）"""
         import asyncio
         loop = asyncio.get_event_loop()
-        return loop.run_until_complete(self._call_mcp_tool(tool_name, arguments))
+        return loop.run_until_complete(self._call_mcp_tool(tool_name, arguments, require_confirm))
     
     async def chat(self, message: str) -> Dict[str, Any]:
         """
@@ -273,14 +481,14 @@ class AIAgent:
         response = await llm_with_tools.ainvoke(formatted_prompt)
         response_content = response.content
         
-        # 处理工具调用
+        # 处理工具调用 - 所有工具调用都需要人工确认
         if hasattr(response, 'tool_calls') and response.tool_calls:
             for tool_call in response.tool_calls:
                 tool_name = tool_call.get("name")
                 tool_args = tool_call.get("args", {})
-                
-                # 调用工具
-                tool_result = await self._call_mcp_tool(tool_name, tool_args)
+
+                # 在非流式模式下，所有工具调用都需要人工确认，不支持直接执行
+                tool_result = f"⚠️ 工具调用（{tool_name}）需要人工确认，请使用流式聊天接口来执行此操作。"
                 
                 # 将工具结果添加到消息历史
                 chat_history.append(AIMessage(content="", tool_calls=[tool_call]))
@@ -315,10 +523,10 @@ class AIAgent:
     async def chat_stream(self, message: str) -> AsyncGenerator[Dict[str, Any], None]:
         """
         处理用户消息（流式，支持工具调用循环）
-        
+
         Args:
             message: 用户消息
-            
+
         Yields:
             流式响应块
         """
@@ -333,7 +541,7 @@ class AIAgent:
         
         # 获取历史消息
         history = await self.crud.get_session_history(self.session_id, limit=10)
-        
+
         # 转换为LangChain消息格式
         chat_history = []
         for msg in history[:-1]:
@@ -341,7 +549,7 @@ class AIAgent:
                 chat_history.append(HumanMessage(content=msg.content))
             elif msg.role == MessageRole.ASSISTANT:
                 chat_history.append(AIMessage(content=msg.content))
-        
+
         # 构建消息
         formatted_prompt = self.prompt.format_messages(
             chat_history=chat_history,
@@ -349,7 +557,7 @@ class AIAgent:
             username=self.auth.user.username if self.auth.user else 'unknown',
             current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
-        
+
         # 使用工具绑定
         llm_with_tools = self.llm.bind_tools(self.tools)
         
@@ -407,64 +615,143 @@ class AIAgent:
                 
                 # 如果有工具调用
                 if tool_calls:
-                    logger.info(f"检测到工具调用: {tool_calls}")
-                    # 通知前端工具调用（使用单独的事件类型）
-                    for tool_call in tool_calls:
-                        # 处理不同的tool_call格式
-                        if isinstance(tool_call, dict):
-                            tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name", "")
-                            tool_args = tool_call.get("args") or tool_call.get("function", {}).get("arguments", {})
-                            tool_call_id = tool_call.get("id") or tool_call.get("function", {}).get("id", "")
-                            # 如果args是字符串，尝试解析为JSON
-                            if isinstance(tool_args, str):
-                                try:
-                                    tool_args = json.loads(tool_args)
-                                except:
-                                    tool_args = {}
-                        else:
-                            # 如果是对象，尝试获取属性
-                            tool_name = getattr(tool_call, 'name', '') or getattr(tool_call, 'function', {}).get('name', '')
-                            tool_args = getattr(tool_call, 'args', {}) or getattr(tool_call, 'function', {}).get('arguments', {})
-                            tool_call_id = getattr(tool_call, 'id', '') or getattr(tool_call, 'function', {}).get('id', '')
-                            if isinstance(tool_args, str):
-                                try:
-                                    tool_args = json.loads(tool_args)
-                                except:
-                                    tool_args = {}
-                        
-                        # 调用工具
-                        tool_result = await self._call_mcp_tool(tool_name, tool_args)
-                        
-                        # 判断工具调用是否成功（通过返回结果判断）
-                        # 如果返回结果以 ❌ 或 ⚠️ 开头，则认为是失败或需要确认
-                        tool_result_str = str(tool_result) if tool_result else ""
-                        is_success = not (tool_result_str.startswith("❌") or tool_result_str.startswith("⚠️"))
-                        
-                        # 使用 mcp_tool_call 事件类型返回完整的工具调用信息
-                        yield {
-                            "type": "mcp_tool_call",
-                            "tool": tool_name,
-                            "tool_call_id": tool_call_id,
-                            "input": tool_args,
-                            "output": tool_result,
-                            "success": is_success
-                        }
-                        
-                        # 将工具结果添加到消息历史
-                        chat_history.append(AIMessage(content=current_content, tool_calls=[tool_call]))
-                        chat_history.append(ToolMessage(content=tool_result, tool_call_id=tool_call.get("id")))
-                        
-                        # 重新构建prompt，包含工具结果
-                        formatted_prompt = self.prompt.format_messages(
-                            chat_history=chat_history,
-                            input="",  # 工具调用后，input 应该为空，让 LLM 基于工具结果生成最终响应
-                            username=self.auth.user.username if self.auth.user else 'unknown',
-                            current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                        )
-                        
-                        # 继续循环，让LLM基于工具结果生成响应
+                    logger.info(f"检测到工具调用: {len(tool_calls)}个工具")
+
+                    # 由于模型一次只调用一个工具，我们只处理第一个工具调用
+                    tool_call = tool_calls[0]  # 只取第一个工具调用
+
+                    # 处理tool_call格式
+                    if isinstance(tool_call, dict):
+                        tool_name = tool_call.get("name") or tool_call.get("function", {}).get("name", "")
+                        tool_args = tool_call.get("args") or tool_call.get("function", {}).get("arguments", {})
+                        tool_call_id = tool_call.get("id") or tool_call.get("function", {}).get("id", "")
+                        # 如果args是字符串，尝试解析为JSON
+                        if isinstance(tool_args, str):
+                            try:
+                                tool_args = json.loads(tool_args)
+                            except:
+                                tool_args = {}
+                    else:
+                        # 如果是对象，尝试获取属性
+                        tool_name = getattr(tool_call, 'name', '') or getattr(tool_call, 'function', {}).get('name', '')
+                        tool_args = getattr(tool_call, 'args', {}) or getattr(tool_call, 'function', {}).get('arguments', {})
+                        tool_call_id = getattr(tool_call, 'id', '') or getattr(tool_call, 'function', {}).get('id', '')
+                        if isinstance(tool_args, str):
+                            try:
+                                tool_args = json.loads(tool_args)
+                            except:
+                                tool_args = {}
+
+                    # 所有工具调用都需要人工确认
+                    logger.info(f"工具调用需要确认: {tool_name}")
+
+                    # 创建操作日志（状态为待确认）
+                    operation_log = await self.crud.create_operation_log(
+                        session_id=self.session_id,
+                        operation_type=tool_name,
+                        tool_name=tool_name,
+                        target_resource=str(tool_args.get("id", tool_args.get("ids", ""))),
+                        params=tool_args,
+                        need_confirm=True,
+                        confirm_reason=f"即将执行工具调用: {tool_name}",
+                        status=OperationStatus.PENDING
+                    )
+
+                    # 发送确认事件给前端
+                    confirm_event = {
+                        "type": "mcp_tool_confirm",
+                        "operation_id": operation_log.id,
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "tool_args": tool_args,
+                        "confirm_reason": f"即将执行工具调用: {tool_name}",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    yield confirm_event
+
+                    # 等待确认结果
+                    if self.redis_state_manager:
+                        try:
+                            logger.info(f"等待工具确认结果: operation_id={operation_log.id}")
+
+                            # 设置待确认状态（30分钟过期时间）
+                            await self.redis_state_manager.set_pending(operation_log.id, {
+                                "tool_name": tool_name,
+                                "tool_args": tool_args,
+                                "session_id": self.session_id
+                            }, timeout=1800)
+
+                            # 等待确认结果
+                            confirmation_result = await self.redis_state_manager.wait_for_confirmation(operation_log.id, timeout=1800)
+
+                            if confirmation_result.get("confirmed", False):
+                                # 用户确认，执行工具
+                                tool_result = await self._execute_mcp_tool(operation_log, tool_name, tool_args)
+
+                                # 发送工具执行结果事件
+                                yield {
+                                    "type": "mcp_tool_call",
+                                    "tool": tool_name,
+                                    "tool_call_id": tool_call_id,
+                                    "input": tool_args,
+                                    "output": tool_result,
+                                    "success": not (str(tool_result).startswith("❌") or str(tool_result).startswith("⚠️"))
+                                }
+
+                                # 将工具结果添加到消息历史
+                                chat_history.append(AIMessage(content=current_content, tool_calls=[tool_call]))
+                                chat_history.append(ToolMessage(content=tool_result, tool_call_id=tool_call_id))
+
+                                # 重新构建prompt，包含工具结果
+                                formatted_prompt = self.prompt.format_messages(
+                                    chat_history=chat_history,
+                                    input="",  # 工具调用后，input 应该为空，让 LLM 基于工具结果生成最终响应
+                                    username=self.auth.user.username if self.auth.user else 'unknown',
+                                    current_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                )
+
+                                # 继续循环，让LLM基于工具结果生成响应
+                                continue
+                            else:
+                                # 用户拒绝
+                                rejection_message = f"⚠️ 用户已拒绝执行工具调用: {tool_name}"
+                                yield {
+                                    "type": "text",
+                                    "content": rejection_message
+                                }
+                                current_content += rejection_message
+
+                                # 清理拒绝的操作日志
+                                await self.crud.update_operation_log(
+                                    operation_log.id,
+                                    status=OperationStatus.REJECTED,
+                                    executed_at=datetime.now()
+                                )
+
+                        except asyncio.TimeoutError as e:
+                            timeout_message = f"⚠️ 工具调用确认超时: {tool_name}。请重新发起请求。"
+                            yield {
+                                "type": "text",
+                                "content": timeout_message
+                            }
+                            current_content += timeout_message
+
+                            # 清理超时的操作日志状态
+                            await self.crud.update_operation_log(
+                                operation_log.id,
+                                status=OperationStatus.REJECTED,
+                                executed_at=datetime.now()
+                            )
+
+                        finally:
+                            # 清理Redis状态
+                            if self.redis_state_manager:
+                                await self.redis_state_manager.cleanup(operation_log.id)
+                    else:
+                        # 如果没有Redis，回退到简单处理
+                        logger.warning("Redis状态机不可用，跳过工具确认")
                         continue
-                
+
                 # 没有工具调用，结束循环
                 else:
                     break

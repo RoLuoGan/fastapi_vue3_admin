@@ -149,25 +149,18 @@ const AIAgentAPI = {
 
   // ==================== 操作确认 ====================
 
-  /**
-   * 获取待确认操作列表
-   */
-  getPendingOperations(params: PendingOperationsQuery) {
-    return request<ApiResponse<PendingOperation[]>>({
-      url: `${API_PATH}/operations/pending`,
-      method: "get",
-      params,
-    });
-  },
 
   /**
-   * 确认操作
+   * 确认工具调用
    */
-  confirmOperation(operationId: number, data: OperationConfirmRequest) {
-    return request<ApiResponse<OperationConfirmResponse>>({
-      url: `${API_PATH}/operation/${operationId}/confirm`,
+  confirmToolCall(operationId: number, confirmed: boolean, comment?: string) {
+    return request<ApiResponse<ToolConfirmResponse>>({
+      url: `${API_PATH}/tool/${operationId}/confirm`,
       method: "post",
-      data,
+      data: {
+        confirmed,
+        comment,
+      },
     });
   },
 
@@ -310,37 +303,13 @@ export interface ChatResponse {
   role: string;
 }
 
-/** 待确认操作查询参数 */
-export interface PendingOperationsQuery {
-  session_id?: number;
-  page?: number;
-  page_size?: number;
-}
 
-/** 待确认操作 */
-export interface PendingOperation {
+/** 工具确认响应 */
+export interface ToolConfirmResponse {
   operation_id: number;
-  session_id: number;
-  operation_type: string;
-  tool_name: string;
-  target_resource?: string;
-  params: Record<string, any>;
-  confirm_reason: string;
-  created_at: string;
-}
-
-/** 操作确认请求 */
-export interface OperationConfirmRequest {
+  success: boolean;
+  result: string;
   confirmed: boolean;
-  comment?: string;
-}
-
-/** 操作确认响应 */
-export interface OperationConfirmResponse {
-  status: string;
-  operation_id: number;
-  result?: any;
-  message?: string;
 }
 
 /** 人工接管请求 */
@@ -392,7 +361,7 @@ export interface McpToolCall {
 
 /** 流式响应块 */
 export interface StreamChunk {
-  type: "text" | "tool_start" | "tool_end" | "mcp_tool_call" | "complete" | "error" | "user_saved";
+  type: "text" | "tool_start" | "tool_end" | "mcp_tool_call" | "mcp_tool_confirm" | "complete" | "error" | "user_saved";
   content?: string;
   tool?: string;
   tool_call_id?: string;
@@ -401,4 +370,10 @@ export interface StreamChunk {
   error?: string;
   success?: boolean;
   message_id?: number;  // 消息保存后返回的ID
+  // 新增字段用于MCP工具确认
+  operation_id?: number;
+  tool_name?: string;
+  tool_args?: any;
+  confirm_reason?: string;
+  timestamp?: string;
 }

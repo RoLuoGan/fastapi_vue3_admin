@@ -54,27 +54,28 @@ class ChatResponse(BaseModel):
 
 class StreamChunk(BaseModel):
     """流式响应块"""
-    type: str = Field(..., description="消息类型: text/tool_call/complete/error")
+    type: str = Field(..., description="消息类型: text/tool_call/complete/error/mcp_tool_confirm")
     content: Optional[str] = None
     tool_call: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    # 新增字段用于MCP工具确认
+    operation_id: Optional[int] = None
+    tool_name: Optional[str] = None
+    tool_call_id: Optional[str] = None
+    tool_args: Optional[Dict[str, Any]] = None
+    confirm_reason: Optional[str] = None
+    timestamp: Optional[str] = None
 
 
 # ==================== 操作确认相关 ====================
 
-class OperationConfirmRequest(BaseModel):
-    """操作确认请求"""
-    operation_id: int = Field(..., description="操作日志ID")
-    confirmed: bool = Field(..., description="是否确认")
+class ToolConfirmRequest(BaseModel):
+    """工具确认请求"""
+    confirmed: bool = Field(..., description="是否确认执行")
     comment: Optional[str] = Field(None, description="确认备注")
 
-
-class OperationConfirmResponse(BaseModel):
-    """操作确认响应"""
-    operation_id: int
-    status: str
-    result: Optional[Dict[str, Any]] = None
-    error_message: Optional[str] = None
+    class Config:
+        extra = "forbid"  # 禁止额外的字段
 
 
 class OperationPendingNotification(BaseModel):

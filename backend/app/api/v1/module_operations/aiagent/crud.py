@@ -11,6 +11,7 @@ from sqlalchemy import select, update, delete, desc, and_
 from sqlalchemy.orm import selectinload
 
 from app.api.v1.module_system.auth.schema import AuthSchema
+from app.core.database import session_connect
 
 from .models import (
     AIAgentSessionModel,
@@ -164,9 +165,21 @@ class AIAgentCRUD:
             confirm_reason=confirm_reason,
             status=status_value
         )
-        self.db.add(log)
-        await self.db.flush()
-        await self.db.refresh(log)
+
+        # 使用独立的数据库会话来确保操作日志被持久化
+        # 避免受FastAPI事务管理的影响
+        try:
+            async with session_connect() as independent_session:
+                independent_session.add(log)
+                await independent_session.flush()
+                await independent_session.refresh(log)
+                await independent_session.commit()
+        except Exception:
+            # 如果独立会话失败，回退到原始方法
+            self.db.add(log)
+            await self.db.flush()
+            await self.db.refresh(log)
+
         return log
     
     async def get_operation_log(self, log_id: int) -> Optional[AIAgentOperationLogModel]:
@@ -176,37 +189,40 @@ class AIAgentCRUD:
             .where(AIAgentOperationLogModel.id == log_id)
         )
         return result.scalar_one_or_none()
-    
+
+
     async def update_operation_log(
         self,
         log_id: int,
         **kwargs
     ) -> AIAgentOperationLogModel:
         """更新操作日志"""
-        await self.db.execute(
-            update(AIAgentOperationLogModel)
-            .where(AIAgentOperationLogModel.id == log_id)
-            .values(**kwargs)
-        )
-        await self.db.flush()
-        return await self.get_operation_log(log_id)
+        # 使用独立的数据库会话来确保更新被持久化
+        try:
+            async with session_connect() as independent_session:
+                await independent_session.execute(
+                    update(AIAgentOperationLogModel)
+                    .where(AIAgentOperationLogModel.id == log_id)
+                    .values(**kwargs)
+                )
+                await independent_session.commit()
+
+                # 使用独立会话重新获取更新后的记录
+                result = await independent_session.execute(
+                    select(AIAgentOperationLogModel)
+                    .where(AIAgentOperationLogModel.id == log_id)
+                )
+                return result.scalar_one()
+        except Exception:
+            # 如果独立会话失败，回退到原始方法
+            await self.db.execute(
+                update(AIAgentOperationLogModel)
+                .where(AIAgentOperationLogModel.id == log_id)
+                .values(**kwargs)
+            )
+            await self.db.flush()
+            return await self.get_operation_log(log_id)
     
-    async def get_pending_operations(
-        self,
-        session_id: Optional[int] = None
-    ) -> List[AIAgentOperationLogModel]:
-        """获取待确认的操作列表"""
-        query = select(AIAgentOperationLogModel).where(
-            AIAgentOperationLogModel.status == OperationStatus.PENDING.value
-        )
-        
-        if session_id:
-            query = query.where(AIAgentOperationLogModel.session_id == session_id)
-        
-        query = query.order_by(AIAgentOperationLogModel.created_at)
-        
-        result = await self.db.execute(query)
-        return result.scalars().all()
     
     # ==================== 规则操作 ====================
     

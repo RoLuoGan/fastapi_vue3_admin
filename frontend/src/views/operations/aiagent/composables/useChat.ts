@@ -16,6 +16,15 @@ export interface Message {
   toolCalls?: McpToolCall[]  // MCP工具调用列表
 }
 
+export interface PendingToolConfirmation {
+  operation_id: number
+  tool_name: string
+  tool_call_id: string
+  tool_args: any
+  confirm_reason: string
+  timestamp: string
+}
+
 export function useChat() {
   const currentSessionId = ref<number | null>(null)
   const messages = ref<Message[]>([])
@@ -23,6 +32,7 @@ export function useChat() {
   const inputMessage = ref('')
   const abortController = ref<AbortController | null>(null)
   const streamingContent = ref('')  // 当前正在流式输出的内容
+  const pendingConfirmations = ref<PendingToolConfirmation[]>([])  // 待确认的工具调用
 
   console.log('[useChat] 初始化聊天 composable')
 
@@ -71,11 +81,16 @@ export function useChat() {
   // 加载会话历史
   const loadHistory = async (sessionId: number) => {
     console.log('[useChat] 开始加载会话历史, session_id:', sessionId)
+    console.log('[useChat] 切换会话前清理待确认列表')
+
+    // 切换会话时清理待确认列表，避免旧会话的确认请求干扰
+    pendingConfirmations.value = []
+
     try {
       const res = await AIAgentAPI.getSessionHistory(sessionId)
       console.log('[useChat] 加载历史响应:', res)
       console.log('[useChat] 响应数据详情:', JSON.stringify(res, null, 2))
-      
+
       if (res.data.code === 0) {
         currentSessionId.value = sessionId
         // 将后端的 tool_calls 映射为前端的 toolCalls
@@ -111,7 +126,7 @@ export function useChat() {
   const sendMsg = async (content?: string) => {
     const msgContent = content || inputMessage.value
     console.log('[useChat] 开始发送消息（流式）, content:', msgContent)
-    
+
     if (!msgContent.trim()) {
       console.warn('[useChat] 消息内容为空')
       ElMessage.warning('请输入消息')
@@ -153,7 +168,7 @@ export function useChat() {
 
     // 显示加载状态
     loading.value = true
-    
+
     // 创建 AbortController 用于取消请求
     abortController.value = new AbortController()
 
@@ -213,6 +228,26 @@ export function useChat() {
             const updatedToolCalls = [...existingToolCalls, newToolCall]
             updateAssistantMessage(streamingContent.value, true, undefined, updatedToolCalls)
             console.log('[useChat] MCP工具调用已记录:', newToolCall)
+          } else if (chunk.type === 'mcp_tool_confirm') {
+            // MCP工具确认请求
+            const confirmation: PendingToolConfirmation = {
+              operation_id: chunk.operation_id,
+              tool_name: chunk.tool_name,
+              tool_call_id: chunk.tool_call_id,
+              tool_args: chunk.tool_args,
+              confirm_reason: chunk.confirm_reason,
+              timestamp: chunk.timestamp
+            }
+
+            // 检查是否是重复的确认请求（基于operation_id）
+            const existingIndex = pendingConfirmations.value.findIndex(c => c.operation_id === confirmation.operation_id)
+            if (existingIndex >= 0) {
+              console.log('[useChat] 替换重复的确认请求:', confirmation.operation_id)
+              pendingConfirmations.value[existingIndex] = confirmation
+            } else {
+              pendingConfirmations.value.push(confirmation)
+            }
+
           } else if (chunk.type === 'tool_start') {
             // 工具调用开始（向后兼容）
             const toolInfo = `\n🔧 正在调用工具: ${chunk.tool}\n`
@@ -281,11 +316,41 @@ export function useChat() {
     streamingContent.value = ''
   }
 
+  // 确认工具调用
+  const confirmToolCall = async (operationId: number, confirmed: boolean, comment?: string) => {
+    // 查找对应的确认项
+    const confirmation = pendingConfirmations.value.find(c => c.operation_id === operationId)
+
+    if (!confirmation) {
+      ElMessage.warning('确认请求无效或已过期')
+      return null
+    }
+
+    try {
+      const res = await AIAgentAPI.confirmToolCall(operationId, confirmed, comment)
+
+      if (res.data.code === 0) {
+        // 从待确认列表中移除
+        pendingConfirmations.value = pendingConfirmations.value.filter(
+          conf => conf.operation_id !== operationId
+        )
+        return res.data.data
+      } else {
+        ElMessage.error(res.data.msg || '确认失败')
+        return null
+      }
+    } catch (error: any) {
+      ElMessage.error('确认失败: ' + (error?.message || '未知错误'))
+      return null
+    }
+  }
+
   // 清空当前会话
   const clearSession = () => {
     currentSessionId.value = null
     messages.value = []
     streamingContent.value = ''
+    pendingConfirmations.value = []
     if (abortController.value) {
       abortController.value.abort()
       abortController.value = null
@@ -299,10 +364,12 @@ export function useChat() {
     loading,
     inputMessage,
     streamingContent,
+    pendingConfirmations,
     createNewSession,
     loadHistory,
     sendMsg,
     stopSend,
+    confirmToolCall,
     clearSession
   }
 }

@@ -10,14 +10,14 @@ from typing import Optional
 
 from app.common.response import SuccessResponse
 from app.core.router_class import OperationLogRoute
-from app.core.dependencies import AuthPermission
+from app.core.dependencies import AuthPermission, redis_getter
 from app.core.logger import logger
 from app.api.v1.module_system.auth.schema import AuthSchema
 
 from .schema import (
     SessionCreateSchema,
     ChatRequest,
-    OperationConfirmRequest,
+    ToolConfirmRequest,
     TakeoverRequest,
     RuleCreateSchema,
     RuleUpdateSchema
@@ -98,14 +98,15 @@ async def chat(
 async def chat_stream(
     request: ChatRequest = Body(...),
     auth: AuthSchema = Depends(AuthPermission(["operations:aiagent:chat"], check_data_scope=False)),
+    redis_client = Depends(redis_getter),
 ):
     """
     发送消息给AI Agent（流式响应，SSE格式）
-    
+
     返回Server-Sent Events流，前端需要使用EventSource接收
     """
     return StreamingResponse(
-        AIAgentService.chat_stream(auth=auth, request=request),
+        AIAgentService.chat_stream(auth=auth, request=request, redis_client=redis_client),
         media_type="text/event-stream; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
@@ -118,41 +119,27 @@ async def chat_stream(
 
 # ==================== 操作确认 ====================
 
-@router.get("/operations/pending", summary="获取待确认操作列表")
-async def get_pending_operations(
-    session_id: Optional[int] = None,
-    auth: AuthSchema = Depends(AuthPermission(["operations:aiagent:confirm"], check_data_scope=False)),
-) -> JSONResponse:
-    """获取待确认的操作列表"""
-    result = await AIAgentService.get_pending_operations(
-        auth=auth,
-        session_id=session_id
-    )
-    return SuccessResponse(data=result, msg="查询成功")
-
-
-@router.post("/operation/{operation_id}/confirm", summary="确认操作")
-async def confirm_operation(
+@router.post("/tool/{operation_id}/confirm", summary="确认工具调用")
+async def confirm_tool_call(
     operation_id: int = Path(..., description="操作ID"),
-    request: OperationConfirmRequest = Body(...),
-    auth: AuthSchema = Depends(AuthPermission(["operations:aiagent:confirm"], check_data_scope=False)),
+    request: ToolConfirmRequest = Body(...),
+    auth: AuthSchema = Depends(AuthPermission(["operations:aiagent:chat"], check_data_scope=False)),
 ) -> JSONResponse:
     """
-    确认或拒绝待确认的操作
-    
+    确认或拒绝MCP工具调用
+
     请求体：
-    - confirmed: true表示确认，false表示拒绝
+    - confirmed: true表示确认执行，false表示拒绝
     - comment: 备注（可选）
     """
-    # 更新请求中的operation_id
-    request.operation_id = operation_id
-    
-    result = await AIAgentService.confirm_operation(auth=auth, request=request)
-    
-    if result.get("status") == "success":
-        return SuccessResponse(data=result, msg="操作已确认并执行")
+    result = await AIAgentService.confirm_tool_call(auth=auth, operation_id=operation_id, request=request)
+
+    if result.get("success"):
+        return SuccessResponse(data=result, msg="工具调用已执行")
     else:
-        return SuccessResponse(data=result, msg="操作已拒绝")
+        return SuccessResponse(data=result, msg="工具调用已拒绝")
+
+
 
 
 # ==================== 人工接管 ====================

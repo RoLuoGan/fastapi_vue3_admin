@@ -19,72 +19,41 @@
           :session-id="currentSessionId"
           :messages="messages"
           :loading="loading"
+          :pending-confirmations="pendingConfirmations"
           @send="handleSendMessage"
           @stop="handleStopMessage"
           @new-session="handleCreateSession"
+          @confirm-tool="handleConfirmTool"
         />
       </el-main>
     </el-container>
-
-    <!-- 待确认操作对话框 -->
-    <ConfirmDialog
-      v-model="confirmVisible"
-      :operation="currentOperation"
-      @confirm="handleConfirmOperation"
-    />
-
-    <!-- 待确认操作提示 -->
-    <el-badge
-      v-if="pendingOpsCount > 0"
-      :value="pendingOpsCount"
-      class="pending-badge"
-    >
-      <el-button
-        type="warning"
-        :icon="Warning"
-        circle
-        @click="showPendingOperations"
-      />
-    </el-badge>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { Warning } from '@element-plus/icons-vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AIAgentAPI from '@/api/operations/aiagent'
 import { useChat } from './composables/useChat'
-import { useConfirm } from './composables/useConfirm'
 import ChatWindow from './components/ChatWindow.vue'
 import SessionList from './components/SessionList.vue'
-import ConfirmDialog from './components/ConfirmDialog.vue'
 
 // 使用composables
 const {
   currentSessionId,
   messages,
   loading,
+  pendingConfirmations,
   createNewSession,
   loadHistory,
   sendMsg,
   stopSend,
+  confirmToolCall,
   clearSession
 } = useChat()
 
-const {
-  pendingOps,
-  loadPendingOperations,
-  confirmOp
-} = useConfirm()
-
 // 会话列表
 const sessions = ref<any[]>([])
-const confirmVisible = ref(false)
-const currentOperation = ref<any>(null)
-
-// 待确认操作数量
-const pendingOpsCount = computed(() => pendingOps.value.length)
 
 // 加载会话列表
 const loadSessions = async () => {
@@ -136,13 +105,17 @@ const handleSelectSession = async (sessionId: number) => {
 // 发送消息
 const handleSendMessage = async (message: string) => {
   await sendMsg(message)
-  // 发送后检查待确认操作
-  await loadPendingOperations(currentSessionId.value || undefined)
 }
 
 // 停止发送消息
 const handleStopMessage = () => {
   stopSend()
+}
+
+// 处理工具确认
+const handleConfirmTool = async (operationId: number, confirmed: boolean, comment?: string) => {
+  console.log('[AIAgent/index.vue] 处理工具确认:', { operationId, confirmed, comment })
+  await confirmToolCall(operationId, confirmed, comment)
 }
 
 // 结束会话
@@ -172,36 +145,12 @@ const handleDeleteSession = (sessionId: number) => {
   ElMessage.warning('删除功能暂未实现')
 }
 
-// 显示待确认操作
-const showPendingOperations = async () => {
-  if (pendingOps.value.length > 0) {
-    currentOperation.value = pendingOps.value[0]
-    confirmVisible.value = true
-  }
-}
-
-// 确认操作
-const handleConfirmOperation = async (operationId: number, confirmed: boolean, comment: string) => {
-  await confirmOp(operationId, confirmed, comment)
-  
-  // 重新加载待确认操作
-  await loadPendingOperations(currentSessionId.value || undefined)
-  
-  // 如果还有待确认操作，显示下一个
-  if (pendingOps.value.length > 0) {
-    currentOperation.value = pendingOps.value[0]
-  }
-}
-
 // 初始化
 onMounted(async () => {
   console.log('[AIAgent/index.vue] ========== 组件已挂载，开始初始化 ==========')
   try {
     console.log('[AIAgent/index.vue] 步骤1: 加载会话列表')
     await loadSessions()
-    
-    console.log('[AIAgent/index.vue] 步骤2: 加载待确认操作')
-    await loadPendingOperations()
     
     console.log('[AIAgent/index.vue] ========== 初始化完成 ==========')
   } catch (error: any) {
@@ -216,12 +165,6 @@ onMounted(async () => {
   }
 })
 
-// 定时刷新待确认操作（每10秒）
-setInterval(() => {
-  if (currentSessionId.value) {
-    loadPendingOperations(currentSessionId.value)
-  }
-}, 10000)
 </script>
 
 <style scoped lang="scss">
@@ -240,12 +183,5 @@ setInterval(() => {
   .el-main {
     padding: 0;
   }
-}
-
-.pending-badge {
-  position: fixed;
-  right: 40px;
-  bottom: 40px;
-  z-index: 1000;
 }
 </style>

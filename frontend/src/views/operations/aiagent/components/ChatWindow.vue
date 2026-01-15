@@ -64,6 +64,62 @@
       </div>
     </div>
 
+    <!-- MCP工具确认弹窗 -->
+    <el-dialog
+      v-model="confirmDialogVisible"
+      title="工具调用确认"
+      width="600px"
+      :close-on-click-modal="false"
+      :show-close="false"
+      center
+    >
+      <div v-if="currentConfirmation" class="confirmation-content">
+        <div class="confirmation-header">
+          <el-alert
+            title="即将执行运维操作"
+            :description="currentConfirmation.confirm_reason"
+            type="warning"
+            show-icon
+            :closable="false"
+          />
+        </div>
+
+        <div class="confirmation-details">
+          <h4>操作详情</h4>
+
+            <div class="detail-item">
+              <span class="label">工具名称：</span>
+              <span class="value">{{ currentConfirmation.tool_name }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">操作ID：</span>
+              <span class="value">{{ currentConfirmation.operation_id }}</span>
+            </div>
+            <div class="detail-item">
+              <span class="label">调用时间：</span>
+              <span class="value">{{ formatTime(currentConfirmation.timestamp) }}
+                <span v-if="getTimeDiff(currentConfirmation.timestamp) > 5" class="time-warning">
+                  ({{ getTimeDiff(currentConfirmation.timestamp).toFixed(1) }}分钟前)
+                </span>
+              </span>
+            </div>
+            <div class="detail-item">
+              <span class="label">参数：</span>
+              <pre class="value args-json">{{ JSON.stringify(currentConfirmation.tool_args, null, 2) }}</pre>
+            </div>
+          </div>
+
+        <div class="confirmation-actions">
+          <el-button @click="handleReject" :loading="confirming" type="danger">
+            拒绝执行
+          </el-button>
+          <el-button @click="handleConfirm" :loading="confirming" type="primary">
+            确认执行
+          </el-button>
+        </div>
+      </div>
+    </el-dialog>
+
     <!-- 输入区域 -->
     <div class="input-container">
       <el-input
@@ -115,16 +171,30 @@ const props = defineProps<{
     toolCalls?: McpToolCall[]
   }>
   loading: boolean
+  pendingConfirmations?: Array<{
+    operation_id: number
+    tool_name: string
+    tool_call_id: string
+    tool_args: any
+    confirm_reason: string
+    timestamp: string
+  }>
 }>()
 
 const emit = defineEmits<{
   'send': [message: string]
   'stop': []
   'new-session': []
+  'confirm-tool': [operationId: number, confirmed: boolean, comment?: string]
 }>()
 
 const inputValue = ref('')
 const messagesRef = ref<HTMLElement>()
+
+// 确认弹窗相关
+const confirmDialogVisible = ref(false)
+const currentConfirmation = ref<any>(null)
+const confirming = ref(false)
 
 // 配置 marked 选项
 onMounted(() => {
@@ -154,6 +224,62 @@ const handleStop = () => {
   emit('stop')
 }
 
+// 确认工具调用
+const handleConfirm = async () => {
+  if (!currentConfirmation.value) return
+
+  // 检查确认请求是否过期
+  const confirmTime = new Date(currentConfirmation.value.timestamp)
+  const now = new Date()
+  const timeDiff = (now.getTime() - confirmTime.getTime()) / 1000 / 60 // 分钟
+
+  if (timeDiff > 10) {
+    ElMessage.warning('确认请求已过期，请重新发送消息')
+    confirmDialogVisible.value = false
+    currentConfirmation.value = null
+    return
+  }
+
+  confirming.value = true
+  try {
+    await emit('confirm-tool', currentConfirmation.value.operation_id, true)
+    confirmDialogVisible.value = false
+    currentConfirmation.value = null
+  } catch (error) {
+    console.error('[ChatWindow] 确认请求失败:', error)
+  } finally {
+    confirming.value = false
+  }
+}
+
+// 拒绝工具调用
+const handleReject = async () => {
+  if (!currentConfirmation.value) return
+
+  // 检查确认请求是否过期
+  const confirmTime = new Date(currentConfirmation.value.timestamp)
+  const now = new Date()
+  const timeDiff = (now.getTime() - confirmTime.getTime()) / 1000 / 60 // 分钟
+
+  if (timeDiff > 10) {
+    ElMessage.warning('确认请求已过期，请重新发送消息')
+    confirmDialogVisible.value = false
+    currentConfirmation.value = null
+    return
+  }
+
+  confirming.value = true
+  try {
+    await emit('confirm-tool', currentConfirmation.value.operation_id, false)
+    confirmDialogVisible.value = false
+    currentConfirmation.value = null
+  } catch (error) {
+    console.error('[ChatWindow] 拒绝请求失败:', error)
+  } finally {
+    confirming.value = false
+  }
+}
+
 // 角色名称
 const getRoleName = (role: string) => {
   const names: Record<string, string> = {
@@ -174,6 +300,13 @@ const formatTime = (time: string) => {
   if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
   if (diff < 86400000) return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   return date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+// 获取时间差（分钟）
+const getTimeDiff = (time: string) => {
+  const date = new Date(time)
+  const now = new Date()
+  return (now.getTime() - date.getTime()) / 1000 / 60
 }
 
 // 格式化内容（使用 marked 解析 Markdown）
@@ -204,6 +337,29 @@ watch(
   () => props.messages,
   () => {
     scrollToBottom()
+  },
+  { deep: true }
+)
+
+// 监听待确认操作，自动显示确认弹窗
+watch(
+  () => props.pendingConfirmations,
+  (newConfirmations) => {
+    if (newConfirmations && newConfirmations.length > 0 && !confirmDialogVisible.value) {
+      // 检查是否有过期的确认请求
+      const now = new Date()
+      const validConfirmations = newConfirmations.filter(c => {
+        const confirmTime = new Date(c.timestamp)
+        const timeDiff = (now.getTime() - confirmTime.getTime()) / 1000 / 60 // 分钟
+        return timeDiff <= 10 // 只保留10分钟内的确认请求
+      })
+
+      if (validConfirmations.length > 0) {
+        // 显示第一个有效的确认操作
+        currentConfirmation.value = validConfirmations[0]
+        confirmDialogVisible.value = true
+      }
+    }
   },
   { deep: true }
 )
@@ -537,6 +693,69 @@ watch(
   }
   to {
     transform: rotate(360deg);
+  }
+}
+
+// 确认弹窗样式
+.confirmation-content {
+  .confirmation-header {
+    margin-bottom: 20px;
+  }
+
+  .confirmation-details {
+    margin-bottom: 20px;
+
+    h4 {
+      margin-bottom: 12px;
+      color: #303133;
+      font-size: 16px;
+      font-weight: 500;
+    }
+
+    .detail-item {
+      display: flex;
+      margin-bottom: 8px;
+      align-items: flex-start;
+
+      .label {
+        min-width: 80px;
+        color: #606266;
+        font-weight: 500;
+        flex-shrink: 0;
+      }
+
+          .value {
+            color: #303133;
+            word-break: break-word;
+
+            .time-warning {
+              color: #e6a23c;
+              font-size: 12px;
+              margin-left: 8px;
+            }
+
+            &.args-json {
+          background: #f5f5f5;
+          padding: 8px;
+          border-radius: 4px;
+          font-family: 'Courier New', monospace;
+          font-size: 12px;
+          max-height: 200px;
+          overflow-y: auto;
+          white-space: pre-wrap;
+          margin: 0;
+          width: 100%;
+        }
+      }
+    }
+  }
+
+  .confirmation-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    padding-top: 20px;
+    border-top: 1px solid #ebeef5;
   }
 }
 
