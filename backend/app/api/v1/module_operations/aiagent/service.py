@@ -339,7 +339,8 @@ class AIAgentService:
         cls,
         auth: AuthSchema,
         operation_id: int,
-        request: ToolConfirmRequest
+        request: ToolConfirmRequest,
+        redis_client=None,
     ) -> Dict[str, Any]:
         """
         确认或拒绝MCP工具调用
@@ -348,6 +349,7 @@ class AIAgentService:
             auth: 认证信息
             operation_id: 操作ID
             request: 确认请求
+            redis_client: Redis 客户端，用于 set_result 唤醒 chat_stream 的 wait_for_confirmation
 
         Returns:
             执行结果
@@ -390,11 +392,12 @@ class AIAgentService:
                     "confirmed": False
                 }
 
-        # 创建AI Agent来执行确认
+        # 创建AI Agent来执行确认（传入 redis_client 以便 set_result 唤醒 chat_stream 的 wait_for_confirmation）
         agent = AIAgent(
             auth=auth,
             session_id=operation_log.session_id,
-            llm_model=session.llm_model
+            llm_model=session.llm_model,
+            redis_client=redis_client
         )
 
         # 执行确认

@@ -91,6 +91,7 @@ class ToolConfirmationRedisState:
             try:
                 # 检查状态
                 state_data = await self.redis.get(key)
+                
                 if not state_data:
                     # 状态已过期或不存在，抛出超时异常
                     raise asyncio.TimeoutError("确认状态已过期，请重新发起请求")
@@ -136,6 +137,7 @@ class ToolConfirmationRedisState:
 
             # 获取当前状态
             state_data = await self.redis.get(key)
+            
             if not state_data:
                 return False
 
@@ -266,7 +268,7 @@ class AIAgent:
             
             # 存储工具名称集合（用于安全验证，防止调用不存在的工具）
             self.available_tool_names = {tool.name for tool in self.tools}
-            
+
             logger.info(f"已加载 {len(self.tools)} 个MCP工具: {list(self.available_tool_names)}")
             
         except Exception as e:
@@ -274,7 +276,13 @@ class AIAgent:
             self.tools = []
             self.available_tool_names = set()
             logger.warning("MCP工具初始化失败，将不使用工具")
-    
+
+    async def _ensure_tools_ready(self) -> None:
+        """等待 MCP 工具加载完成（供 confirm、_execute_mcp_tool 等流程在需要前调用）"""
+        t = getattr(self, "_tools_init_task", None)
+        if t is not None:
+            await t
+
     def _init_agent(self):
         """初始化Agent"""
         # 构建Prompt（从 prompts.py 导入）
@@ -284,8 +292,8 @@ class AIAgent:
             ("human", "{input}")
         ])
         
-        # 初始化工具（异步加载MCP工具）
-        asyncio.create_task(self._init_tools())
+        # 初始化工具（异步加载MCP工具），保存 task 供 confirm 等流程 await 就绪
+        self._tools_init_task = asyncio.create_task(self._init_tools())
     
     async def _call_mcp_tool(self, tool_name: str, arguments: Any, require_confirm: bool = False) -> str:
         """
@@ -413,9 +421,21 @@ class AIAgent:
         # 尝试通知等待的agent确认结果（通过Redis状态机）
         if self.redis_state_manager:
             try:
+                # 将 operation_log 对象转换为可序列化的字典
+                operation_log_dict = {
+                    "id": operation_log.id,
+                    "session_id": operation_log.session_id,
+                    "tool_name": operation_log.tool_name,
+                    "params": operation_log.params,
+                    "status": operation_log.status,
+                    "operation_type": operation_log.operation_type,
+                    "target_resource": operation_log.target_resource,
+                    "need_confirm": operation_log.need_confirm,
+                    "confirm_reason": operation_log.confirm_reason
+                }
                 await self.redis_state_manager.set_result(operation_id, confirmed, {
                     "confirmed": confirmed,
-                    "operation_log": operation_log
+                    "operation_log": operation_log_dict
                 })
             except Exception as e:
                 logger.warning(f"设置Redis确认结果失败，可能已过期: {str(e)}")
@@ -429,7 +449,12 @@ class AIAgent:
             )
             return "❌ 用户已拒绝执行该操作"
 
-        # 执行工具
+        # 有 Redis 且已确认：由 chat_stream 负责执行工具并继续循环，此处仅 set_result 唤醒流，不重复执行
+        if self.redis_state_manager:
+            return "✅ 已确认，执行结果将通过对话流返回"
+
+        # 无 Redis：此处执行工具并返回结果
+        await self._ensure_tools_ready()
         return await self._execute_mcp_tool(operation_log, operation_log.tool_name, operation_log.params)
 
     def _call_mcp_tool_sync(self, tool_name: str, arguments: Any, require_confirm: bool = False) -> str:

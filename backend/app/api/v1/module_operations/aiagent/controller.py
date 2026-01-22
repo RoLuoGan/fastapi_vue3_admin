@@ -124,6 +124,7 @@ async def confirm_tool_call(
     operation_id: int = Path(..., description="操作ID"),
     request: ToolConfirmRequest = Body(...),
     auth: AuthSchema = Depends(AuthPermission(["operations:aiagent:chat"], check_data_scope=False)),
+    redis_client=Depends(redis_getter),
 ) -> JSONResponse:
     """
     确认或拒绝MCP工具调用
@@ -132,7 +133,7 @@ async def confirm_tool_call(
     - confirmed: true表示确认执行，false表示拒绝
     - comment: 备注（可选）
     """
-    result = await AIAgentService.confirm_tool_call(auth=auth, operation_id=operation_id, request=request)
+    result = await AIAgentService.confirm_tool_call(auth=auth, operation_id=operation_id, request=request, redis_client=redis_client)
 
     if result.get("success"):
         return SuccessResponse(data=result, msg="工具调用已执行")
